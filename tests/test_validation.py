@@ -58,6 +58,33 @@ def test_bad_provenance_record_rejected():
     assert "watermark_id" in message
 
 
+def test_derived_output_lineage_fields_pass():
+    record = copy.deepcopy(GOOD_PROVENANCE_RECORD)
+    record["generation_mode"] = "retake"
+    record["source_generation_id"] = "a1b2c3d4e5f60718"
+    validate_provenance_record(record)
+
+
+def test_fresh_generation_lineage_defaults_pass():
+    record = copy.deepcopy(GOOD_PROVENANCE_RECORD)
+    record["generation_mode"] = "text2music"
+    record["source_generation_id"] = None
+    validate_provenance_record(record)
+
+
+def test_v010_record_without_lineage_fields_still_valid():
+    # Records written before v0.2.0 must keep validating unchanged.
+    validate_provenance_record(copy.deepcopy(GOOD_PROVENANCE_RECORD))
+
+
+def test_unknown_generation_mode_rejected():
+    record = copy.deepcopy(GOOD_PROVENANCE_RECORD)
+    record["generation_mode"] = "remix"
+    with pytest.raises(AttributionValidationError) as excinfo:
+        validate_provenance_record(record)
+    assert "generation_mode" in str(excinfo.value) or "remix" in str(excinfo.value)
+
+
 def test_good_model_card_passes():
     validate_model_card(GOOD_MODEL_CARD)
 

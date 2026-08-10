@@ -55,6 +55,17 @@
       "minimum": 0,
       "maximum": 65535,
       "default": null
+    },
+    "generation_mode": {
+      "type": "string",
+      "description": "How the output was produced: a fresh text-to-music generation, or a derivation of an earlier output.",
+      "enum": ["text2music", "retake", "repaint", "extend", "audio2audio"],
+      "default": "text2music"
+    },
+    "source_generation_id": {
+      "type": ["string", "null"],
+      "description": "Generation ID of the source output this one was derived from (retake/repaint/extend/audio2audio). Null for fresh generations.",
+      "default": null
     }
   },
   "required": [

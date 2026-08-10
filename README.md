@@ -46,6 +46,8 @@ was made.
 | `base_model` | The name and version of the underlying base model the adapter was applied to. |
 | `base_model_licence` | The licence the base model is distributed under, so downstream users know what terms apply. |
 | `watermark_id` | *(optional)* A small whole number between 0 and 65535 that will be embedded in the audio watermark, tying the file back to this record. Until watermarking is implemented, this is `null` (or omitted entirely). |
+| `generation_mode` | *(optional, since v0.2.0)* How the output was produced: `text2music` for a fresh generation (the default when omitted), or `retake`, `repaint`, `extend`, `audio2audio` for outputs derived from an earlier one. |
+| `source_generation_id` | *(optional, since v0.2.0)* When the output was derived from an earlier generation, the generation ID of that source output, so lineage can be traced through the registry. `null` (or omitted) for fresh generations. |
 
 ## Model card fields
 
