@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/BlurredEdgeVR/Khaos_Attribution/schemas/model_card.schema.json",
+  "title": "Model Card",
+  "description": "A card describing an artist adapter: who consented, what it was trained on, and which base model it extends.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "description": "Version of this model card schema, e.g. '1.0.0'.",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "artist_name": {
+      "type": "string",
+      "description": "Human-readable name of the artist the adapter represents.",
+      "minLength": 1
+    },
+    "artist_id": {
+      "type": "string",
+      "description": "Stable unique identifier for the artist.",
+      "minLength": 1
+    },
+    "consent_statement": {
+      "type": "string",
+      "description": "Plain-language statement recording the artist's consent to train this adapter.",
+      "minLength": 1
+    },
+    "training_catalogue": {
+      "type": "array",
+      "description": "The tracks the adapter was trained on.",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Title of the track.",
+            "minLength": 1
+          },
+          "duration": {
+            "type": "number",
+            "description": "Duration of the track in seconds.",
+            "exclusiveMinimum": 0
+          }
+        },
+        "required": ["title", "duration"],
+        "additionalProperties": false
+      }
+    },
+    "training_date": {
+      "type": "string",
+      "description": "Date the adapter was trained, as an ISO 8601 date (YYYY-MM-DD).",
+      "format": "date",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+    },
+    "adapter_version": {
+      "type": "string",
+      "description": "Version of the adapter this card describes.",
+      "minLength": 1
+    },
+    "base_model": {
+      "type": "string",
+      "description": "Name and version of the base model the adapter was trained against.",
+      "minLength": 1
+    },
+    "base_model_licence": {
+      "type": "string",
+      "description": "Licence under which the base model is distributed.",
+      "minLength": 1
+    }
+  },
+  "required": [
+    "schema_version",
+    "artist_name",
+    "artist_id",
+    "consent_statement",
+    "training_catalogue",
+    "training_date",
+    "adapter_version",
+    "base_model",
+    "base_model_licence"
+  ],
+  "additionalProperties": false
+}

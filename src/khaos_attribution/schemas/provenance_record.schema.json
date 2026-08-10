@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/BlurredEdgeVR/Khaos_Attribution/schemas/provenance_record.schema.json",
+  "title": "Provenance Record",
+  "description": "A record attached to a generated output, documenting which artist adapter, prompt, and base model produced it.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "description": "Version of this provenance record schema, e.g. '1.0.0'.",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "artist_name": {
+      "type": "string",
+      "description": "Human-readable name of the artist whose adapter was used.",
+      "minLength": 1
+    },
+    "artist_id": {
+      "type": "string",
+      "description": "Stable unique identifier for the artist.",
+      "minLength": 1
+    },
+    "adapter_version": {
+      "type": "string",
+      "description": "Version of the artist adapter used for this generation.",
+      "minLength": 1
+    },
+    "adapter_hash": {
+      "type": "string",
+      "description": "Cryptographic hash of the adapter weights, hex-encoded.",
+      "pattern": "^[0-9a-fA-F]{8,128}$"
+    },
+    "prompt": {
+      "type": "string",
+      "description": "The prompt text used to produce the output."
+    },
+    "timestamp": {
+      "type": "string",
+      "description": "When the output was generated, as an ISO 8601 date-time.",
+      "format": "date-time"
+    },
+    "base_model": {
+      "type": "string",
+      "description": "Name and version of the base model the adapter was applied to.",
+      "minLength": 1
+    },
+    "base_model_licence": {
+      "type": "string",
+      "description": "Licence under which the base model is distributed.",
+      "minLength": 1
+    },
+    "watermark_id": {
+      "type": ["integer", "null"],
+      "description": "Identifier embedded in the audio watermark. Null until watermarking is implemented.",
+      "minimum": 0,
+      "maximum": 65535,
+      "default": null
+    }
+  },
+  "required": [
+    "schema_version",
+    "artist_name",
+    "artist_id",
+    "adapter_version",
+    "adapter_hash",
+    "prompt",
+    "timestamp",
+    "base_model",
+    "base_model_licence"
+  ],
+  "additionalProperties": false
+}
