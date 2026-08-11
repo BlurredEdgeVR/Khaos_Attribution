@@ -5,6 +5,10 @@ schemas — a **provenance record** attached to every generated output, and a
 **model card** describing an artist adapter — plus Python functions that
 validate records against them using [jsonschema](https://python-jsonschema.readthedocs.io/).
 
+This repo is the *data* contract of the Khaos ecosystem; the *visual*
+contract (shared design language for the toolkit and listening-space UIs)
+lives in the `Khaos_Platform` repo's `DESIGN.md`.
+
 ## Installation
 
 Directly from GitHub:
