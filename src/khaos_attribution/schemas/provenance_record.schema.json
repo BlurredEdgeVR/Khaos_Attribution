@@ -8,7 +8,8 @@
     "schema_version": {
       "type": "string",
       "description": "Version of this provenance record schema, e.g. '1.0.0'.",
-      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "const": "1.0.0"
     },
     "artist_name": {
       "type": "string",

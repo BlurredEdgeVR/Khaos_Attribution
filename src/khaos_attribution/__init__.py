@@ -7,11 +7,24 @@ from khaos_attribution.validation import (
     validate_provenance_record,
 )
 
+# THE schema_version values writers must stamp into records/cards.
+# Each matches the `const` on `schema_version` in the corresponding bundled schema;
+# any other value is rejected by validation.
+PROVENANCE_SCHEMA_VERSION = "1.0.0"
+MODEL_CARD_SCHEMA_VERSION = "1.0.0"
+
 __all__ = [
     "AttributionValidationError",
+    "MODEL_CARD_SCHEMA_VERSION",
+    "PROVENANCE_SCHEMA_VERSION",
     "load_schema",
     "validate_model_card",
     "validate_provenance_record",
 ]
 
-__version__ = "0.2.0"
+try:
+    from importlib.metadata import version as _dist_version
+
+    __version__ = _dist_version("khaos_attribution")
+except Exception:  # pragma: no cover - package not installed (e.g. run from a checkout)
+    __version__ = "0.3.0"

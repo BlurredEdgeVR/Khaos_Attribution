@@ -3,7 +3,10 @@ import copy
 import pytest
 
 from khaos_attribution import (
+    MODEL_CARD_SCHEMA_VERSION,
+    PROVENANCE_SCHEMA_VERSION,
     AttributionValidationError,
+    load_schema,
     validate_model_card,
     validate_provenance_record,
 )
@@ -72,9 +75,25 @@ def test_fresh_generation_lineage_defaults_pass():
     validate_provenance_record(record)
 
 
+# A literal record exactly as writers produced it under schema package v0.1.0:
+# no generation_mode, no source_generation_id, no watermark_id keys.
+# Frozen deliberately — do not "modernise" it; it guards backwards compatibility.
+V010_PROVENANCE_RECORD = {
+    "schema_version": "1.0.0",
+    "artist_name": "Ava Example",
+    "artist_id": "artist-0001",
+    "adapter_version": "0.1.0",
+    "adapter_hash": "a3f5c9d871be4402913377aa5cc0e1b2",
+    "prompt": "A slow ambient piece with tape hiss and distant piano.",
+    "timestamp": "2026-01-15T12:00:00Z",
+    "base_model": "khaos-audio-base-1",
+    "base_model_licence": "CC-BY-NC-4.0",
+}
+
+
 def test_v010_record_without_lineage_fields_still_valid():
     # Records written before v0.2.0 must keep validating unchanged.
-    validate_provenance_record(copy.deepcopy(GOOD_PROVENANCE_RECORD))
+    validate_provenance_record(copy.deepcopy(V010_PROVENANCE_RECORD))
 
 
 def test_unknown_generation_mode_rejected():
@@ -98,3 +117,32 @@ def test_bad_model_card_rejected():
     message = str(excinfo.value)
     assert "consent_statement" in message
     assert "duration" in message
+
+
+def test_wrong_provenance_schema_version_rejected():
+    record = copy.deepcopy(GOOD_PROVENANCE_RECORD)
+    record["schema_version"] = "9.9.9"
+    with pytest.raises(AttributionValidationError) as excinfo:
+        validate_provenance_record(record)
+    assert "schema_version" in str(excinfo.value)
+
+
+def test_wrong_model_card_schema_version_rejected():
+    card = copy.deepcopy(GOOD_MODEL_CARD)
+    card["schema_version"] = "9.9.9"
+    with pytest.raises(AttributionValidationError) as excinfo:
+        validate_model_card(card)
+    assert "schema_version" in str(excinfo.value)
+
+
+def test_exported_constants_match_schema_const():
+    provenance_schema = load_schema("provenance_record.schema.json")
+    card_schema = load_schema("model_card.schema.json")
+    assert (
+        PROVENANCE_SCHEMA_VERSION
+        == provenance_schema["properties"]["schema_version"]["const"]
+    )
+    assert (
+        MODEL_CARD_SCHEMA_VERSION
+        == card_schema["properties"]["schema_version"]["const"]
+    )
