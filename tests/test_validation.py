@@ -146,3 +146,19 @@ def test_exported_constants_match_schema_const():
         MODEL_CARD_SCHEMA_VERSION
         == card_schema["properties"]["schema_version"]["const"]
     )
+
+
+def test_catalogue_vocal_flag_optional_and_boolean():
+    # 0.4.1: 'vocal' is optional (older cards predate it) but must be a
+    # boolean when present — no third state sneaks into the contract.
+    card = copy.deepcopy(GOOD_MODEL_CARD)
+    card["training_catalogue"] = [
+        {"title": "Sung one", "duration": 201.5, "vocal": True},
+        {"title": "Instrumental one", "duration": 187.0, "vocal": False},
+        {"title": "Pre-0.4.1 entry", "duration": 90.0},
+    ]
+    validate_model_card(card)
+
+    card["training_catalogue"][0]["vocal"] = "yes"
+    with pytest.raises(AttributionValidationError):
+        validate_model_card(card)

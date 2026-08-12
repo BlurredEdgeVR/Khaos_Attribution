@@ -42,6 +42,10 @@
             "type": "number",
             "description": "Duration of the track in seconds.",
             "exclusiveMinimum": 0
+          },
+          "vocal": {
+            "type": "boolean",
+            "description": "True if the track has sung vocals, false if instrumental. Optional — cards written before khaos-attribution 0.4.1 predate this field."
           }
         },
         "required": ["title", "duration"],
