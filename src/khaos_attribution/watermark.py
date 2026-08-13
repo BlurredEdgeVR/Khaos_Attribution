@@ -23,7 +23,7 @@ they were established — see that repo's git history for the evidence):
 3. The 2048-payload space is partitioned by issuer so two registries
    can never hand out colliding IDs:
        platform  payloads    0-1023   (Listening Space outputs)
-       app       payloads 1024-2047   (Inspector test renders)
+       app       payloads 1024-2047   (Workshop test renders)
    A decoded codeword's issuer is recoverable via watermark_issuer().
 
 4. Models are 16 kHz-native; outputs are 44.1/48 kHz. The watermark
