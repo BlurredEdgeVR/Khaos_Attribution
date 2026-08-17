@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "khaos_attribution"
-version = "0.5.2"
+version = "0.6.0"
 description = "JSON schemas and validators for artist attribution: provenance records and model cards."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -12,6 +12,10 @@ license = { text = "MIT" }
 authors = [{ name = "BlurredEdgeVR" }]
 dependencies = [
     "jsonschema>=4.18",
+    # blend.py and embedding.py: the estimator math and embedding contract
+    # are shared by the Workshop and the Listening Space — one
+    # implementation, versioned with the schemas it feeds.
+    "numpy>=1.24",
 ]
 
 [project.optional-dependencies]
