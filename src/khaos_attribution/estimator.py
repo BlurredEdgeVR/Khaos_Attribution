@@ -42,9 +42,20 @@ def build_estimate(*, generation_id: str, artist_id: str,
     """The full pipeline after embedding: exposure → similarity → blend →
     ranges → money → validated document.
 
-    Raises ValueError when no training track has embeddings — a partial
-    estimate is worse than none.
+    Preconditions the caller owns: every value in `rights` must be a
+    schema-valid track_rights record (validate_track_rights) — money math
+    reads writers/publishers/title directly; and `exposure_basis` names the
+    data source, the ONE field that legitimately differs between apps.
+
+    Raises ValueError when no training track has embeddings, or when the
+    embedding index and array disagree — a torn bundle must fail loudly,
+    not misattribute quietly.
     """
+    if len(row_track_ids) != len(embeddings):
+        raise ValueError(
+            f"Embedding index lists {len(row_track_ids)} rows but the array "
+            f"holds {len(embeddings)} — the store/bundle is torn (files "
+            f"copied at different times?). Refusing to estimate from it.")
     caveats = [BASE_CAVEAT, *extra_caveats]
 
     missing = sorted(run_tracks - set(segment_counts))

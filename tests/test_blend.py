@@ -153,3 +153,24 @@ def test_largest_remainder_survives_a_251_track_catalogue():
     pcts = blend.largest_remainder_pcts(shares)
     assert round(sum(pcts.values()), 4) == 100.0
     assert all(abs(pcts[t] - shares[t] * 100) <= 0.0002 for t in shares)
+
+
+def test_a_torn_bundle_is_refused_not_misattributed():
+    """Index rows and the embedding array are two separately copied files;
+    when their counts disagree the store is torn, and zip-truncation would
+    silently drop tracks from similarity (found in review: a 3-track index
+    over a 2-row array crashed on one shape and mislabeled itself as
+    'uninformative' on another)."""
+    from khaos_attribution.estimator import build_estimate
+    with pytest.raises(ValueError, match="torn"):
+        build_estimate(
+            generation_id="g", artist_id="a", adapter_version="r",
+            run_tracks={"a", "b", "c"},
+            segment_counts={"a": 1, "b": 1, "c": 1},
+            n_training_pairs=3,
+            embeddings=np.eye(2, dtype=np.float32),
+            row_track_ids=["a", "b", "c"],
+            output_embedding=np.array([1.0, 0.0], dtype=np.float32),
+            rights={}, fallback_titles={},
+            embedding_model=None, embedding_version=None,
+            exposure_basis="test")
