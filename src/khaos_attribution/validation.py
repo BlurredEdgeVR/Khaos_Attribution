@@ -63,13 +63,55 @@ def _check_share_sum(parties, pool, record_kind, required=True):
             f"Invalid {record_kind}: {pool} shares sum to {total:g}, not 100")
 
 
+_CODE_RULES = {
+    "isrc": (r"^[A-Z]{2}[A-Z0-9]{3}[0-9]{7}$",
+             "an ISRC looks like GBAYE2612345 — two-letter country, "
+             "three-character registrant, seven digits, no dashes"),
+    "iswc": (r"^T-[0-9]{9}-[0-9]$",
+             "an ISWC looks like T-123456789-1 — the letter T, nine "
+             "digits, and a final check digit"),
+}
+
+
+def _check_code_fields(record, record_kind):
+    """Say what is wrong with an ISRC/ISWC in words, not in regex.
+
+    The schema enforces identical rules; these checks run first so the
+    operator reads "marked 'assigned' but carries no code" instead of
+    "'' does not match '^T-[0-9]{9}-[0-9]$'".
+    """
+    import re
+
+    for key, (pattern, hint) in _CODE_RULES.items():
+        field = record.get(key)
+        if not isinstance(field, dict):
+            continue
+        status, value = field.get("status"), field.get("value")
+        if status == "assigned" and not value:
+            raise AttributionValidationError(
+                f"Invalid {record_kind}: {key.upper()} is marked 'assigned' "
+                f"but carries no code — enter the code, or set the status to "
+                f"'none assigned' / 'not yet looked up'.")
+        if status != "assigned" and value:
+            raise AttributionValidationError(
+                f"Invalid {record_kind}: {key.upper()} has a code but its "
+                f"status says '{status}' — set the status to 'assigned' or "
+                f"clear the code.")
+        if value and isinstance(value, str) and not re.fullmatch(pattern, value):
+            raise AttributionValidationError(
+                f"Invalid {record_kind}: {value!r} is not a standard "
+                f"{key.upper()} — {hint}.")
+
+
 def validate_track_rights(record):
     """Validate a track rights record; raise AttributionValidationError if invalid.
 
-    Beyond the schema: writer shares must sum to 100, and publisher shares
-    must sum to 100 whenever any publisher is listed (an empty publisher
-    list is legitimate — unpublished or self-released work).
+    Beyond the schema: writer shares must sum to 100, publisher shares must
+    sum to 100 whenever any publisher is listed (an empty publisher list is
+    legitimate — unpublished or self-released work), and ISRC/ISWC problems
+    are reported in words rather than schema regex.
     """
+    _check_code_fields(record, "track rights record")
     _validate(record, "track_rights.schema.json", "track rights record")
     _check_share_sum(record["writers"], "writers", "track rights record")
     _check_share_sum(record["publishers"], "publishers", "track rights record",
