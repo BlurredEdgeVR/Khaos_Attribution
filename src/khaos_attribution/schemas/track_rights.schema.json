@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/BlurredEdgeVR/Khaos_Attribution/schemas/track_rights.schema.json",
+  "title": "Track Rights Record",
+  "description": "Who owns one training track: writers and publishers with their shares, plus the industry identifiers (ISRC for the recording, ISWC for the underlying work). Absence is always explicit — 'none assigned' and 'not yet looked up' are different facts, and only 'assigned' carries a value.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "description": "Version of this track rights schema.",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "const": "1.0.0"
+    },
+    "track_id": {
+      "type": "string",
+      "description": "The Workshop's stable track identifier this record describes.",
+      "minLength": 1
+    },
+    "title": {
+      "type": "string",
+      "description": "Human-readable track title.",
+      "minLength": 1
+    },
+    "isrc": {
+      "$ref": "#/$defs/isrc_field",
+      "description": "International Standard Recording Code — identifies the RECORDING the adapter trained on."
+    },
+    "iswc": {
+      "$ref": "#/$defs/iswc_field",
+      "description": "International Standard Musical Work Code — identifies the COMPOSITION, which is what writer shares attach to."
+    },
+    "writers": {
+      "type": "array",
+      "description": "The writers of the underlying work and their shares. Shares must sum to 100 (checked by the validator, not the schema).",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/writer" }
+    },
+    "publishers": {
+      "type": "array",
+      "description": "The publishers and their shares. May be empty for unpublished / self-released work; if present, shares must sum to 100.",
+      "items": { "$ref": "#/$defs/publisher" }
+    },
+    "source": {
+      "type": "string",
+      "description": "Where this rights data came from — provenance of the provenance.",
+      "enum": ["operator-entered", "prs-confirmed", "distributor", "musicbrainz", "other"]
+    },
+    "verified_date": {
+      "type": "string",
+      "description": "When the shares were last confirmed against the source, ISO 8601 date.",
+      "format": "date"
+    }
+  },
+  "required": ["schema_version", "track_id", "title", "isrc", "iswc", "writers", "publishers", "source"],
+  "additionalProperties": false,
+  "$defs": {
+    "isrc_field": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["assigned", "none_assigned", "not_yet_looked_up"]
+        },
+        "value": {
+          "type": ["string", "null"],
+          "pattern": "^[A-Z]{2}[A-Z0-9]{3}[0-9]{7}$"
+        }
+      },
+      "required": ["status"],
+      "additionalProperties": false,
+      "if": { "properties": { "status": { "const": "assigned" } } },
+      "then": { "required": ["value"], "properties": { "value": { "type": "string" } } }
+    },
+    "iswc_field": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["assigned", "none_assigned", "not_yet_looked_up"]
+        },
+        "value": {
+          "type": ["string", "null"],
+          "pattern": "^T-[0-9]{9}-[0-9]$"
+        }
+      },
+      "required": ["status"],
+      "additionalProperties": false,
+      "if": { "properties": { "status": { "const": "assigned" } } },
+      "then": { "required": ["value"], "properties": { "value": { "type": "string" } } }
+    },
+    "writer": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "role": {
+          "type": "string",
+          "enum": ["composer", "lyricist", "composer_lyricist", "arranger"]
+        },
+        "ipi": {
+          "type": ["string", "null"],
+          "description": "Interested Party Information number, if known.",
+          "pattern": "^[0-9]{9,11}$"
+        },
+        "share_pct": { "type": "number", "minimum": 0, "maximum": 100 }
+      },
+      "required": ["name", "role", "share_pct"],
+      "additionalProperties": false
+    },
+    "publisher": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "ipi": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9]{9,11}$"
+        },
+        "share_pct": { "type": "number", "minimum": 0, "maximum": 100 }
+      },
+      "required": ["name", "share_pct"],
+      "additionalProperties": false
+    }
+  }
+}
