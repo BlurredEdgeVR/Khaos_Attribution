@@ -68,8 +68,9 @@ _CODE_RULES = {
              "an ISRC looks like GBAYE2612345 — two-letter country, "
              "three-character registrant, seven digits, no dashes"),
     "iswc": (r"^T-[0-9]{9}-[0-9]$",
-             "an ISWC looks like T-123456789-1 — the letter T, nine "
-             "digits, and a final check digit"),
+             "an ISWC is the letter T, nine digits, and a final check "
+             "digit, stored as T-123456789-1 (paperwork prints the same "
+             "code dotted: T-123.456.789-1)"),
 }
 
 
