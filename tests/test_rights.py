@@ -183,3 +183,24 @@ def test_the_method_block_is_required():
     del record["method"]
     with pytest.raises(AttributionValidationError):
         validate_attribution_estimate(record)
+
+
+def test_code_errors_speak_english_not_regex():
+    """The operator who typed nothing into an 'assigned' ISWC must read
+    "carries no code", never "'' does not match '^T-[0-9]{9}-[0-9]$'"."""
+    record = copy.deepcopy(GOOD_RIGHTS)
+    record["iswc"] = {"status": "assigned", "value": ""}
+    with pytest.raises(AttributionValidationError) as exc:
+        validate_track_rights(record)
+    assert "carries no code" in str(exc.value)
+    assert "does not match" not in str(exc.value)
+
+    record["iswc"] = {"status": "assigned", "value": "T-12345-X"}
+    with pytest.raises(AttributionValidationError) as exc:
+        validate_track_rights(record)
+    assert "T-123456789-1" in str(exc.value), "the message must show the shape"
+
+    record["iswc"] = {"status": "not_yet_looked_up", "value": "T-123456789-1"}
+    with pytest.raises(AttributionValidationError) as exc:
+        validate_track_rights(record)
+    assert "status says" in str(exc.value)
