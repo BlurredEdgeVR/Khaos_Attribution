@@ -98,6 +98,14 @@ def _check_code_fields(record, record_kind):
                 f"Invalid {record_kind}: {key.upper()} has a code but its "
                 f"status says '{status}' — set the status to 'assigned' or "
                 f"clear the code.")
+        if status != "assigned" and value == "":
+            # An empty string is "no code" to a human but a pattern
+            # violation to the schema — without this, '' leaks the regex
+            # this function exists to translate.
+            raise AttributionValidationError(
+                f"Invalid {record_kind}: {key.upper()} carries an empty code "
+                f"string — omit the value entirely when the status is "
+                f"'{status}'.")
         if value and isinstance(value, str) and not re.fullmatch(pattern, value):
             raise AttributionValidationError(
                 f"Invalid {record_kind}: {value!r} is not a standard "

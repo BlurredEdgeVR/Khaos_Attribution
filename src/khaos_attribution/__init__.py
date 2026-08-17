@@ -35,4 +35,4 @@ try:
 
     __version__ = _dist_version("khaos_attribution")
 except Exception:  # pragma: no cover - package not installed (e.g. run from a checkout)
-    __version__ = "0.5.1"
+    __version__ = "0.5.2"
