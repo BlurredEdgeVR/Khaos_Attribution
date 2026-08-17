@@ -3,8 +3,10 @@
 from khaos_attribution.validation import (
     AttributionValidationError,
     load_schema,
+    validate_attribution_estimate,
     validate_model_card,
     validate_provenance_record,
+    validate_track_rights,
 )
 
 # THE schema_version values writers must stamp into records/cards.
@@ -12,14 +14,20 @@ from khaos_attribution.validation import (
 # any other value is rejected by validation.
 PROVENANCE_SCHEMA_VERSION = "1.0.0"
 MODEL_CARD_SCHEMA_VERSION = "1.0.0"
+TRACK_RIGHTS_SCHEMA_VERSION = "1.0.0"
+ATTRIBUTION_ESTIMATE_SCHEMA_VERSION = "1.0.0"
 
 __all__ = [
+    "ATTRIBUTION_ESTIMATE_SCHEMA_VERSION",
     "AttributionValidationError",
     "MODEL_CARD_SCHEMA_VERSION",
     "PROVENANCE_SCHEMA_VERSION",
+    "TRACK_RIGHTS_SCHEMA_VERSION",
     "load_schema",
+    "validate_attribution_estimate",
     "validate_model_card",
     "validate_provenance_record",
+    "validate_track_rights",
 ]
 
 try:
@@ -27,4 +35,4 @@ try:
 
     __version__ = _dist_version("khaos_attribution")
 except Exception:  # pragma: no cover - package not installed (e.g. run from a checkout)
-    __version__ = "0.4.1"
+    __version__ = "0.5.0"
