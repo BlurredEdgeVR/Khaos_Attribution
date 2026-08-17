@@ -43,7 +43,8 @@ import math
 import numpy as np
 
 ESTIMATOR_VERSION = "0.1.1"
-EXPOSURE_BASIS = "training segments per track"
+# exposure_basis moved to a per-document string naming the data source
+# ("live Workshop store" / "bundled at artist import") — see estimator.py.
 TOP_K = 3            # segments per track that speak for it
 SPREAD_FLOOR = 0.005  # cosine std-dev below which similarity is noise
 
