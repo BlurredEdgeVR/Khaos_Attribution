@@ -204,3 +204,14 @@ def test_code_errors_speak_english_not_regex():
     with pytest.raises(AttributionValidationError) as exc:
         validate_track_rights(record)
     assert "status says" in str(exc.value)
+
+
+def test_empty_code_string_under_any_status_speaks_english():
+    """'' under a non-assigned status skipped every word-check and leaked
+    the schema regex — found in review."""
+    record = copy.deepcopy(GOOD_RIGHTS)
+    record["iswc"] = {"status": "none_assigned", "value": ""}
+    with pytest.raises(AttributionValidationError) as exc:
+        validate_track_rights(record)
+    assert "does not match" not in str(exc.value)
+    assert "empty code" in str(exc.value)
