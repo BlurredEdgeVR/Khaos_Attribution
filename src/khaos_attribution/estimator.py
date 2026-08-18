@@ -87,7 +87,13 @@ def build_estimate(*, generation_id: str, artist_id: str,
             "noise floor); blended shares equal the exposure prior.")
 
     blended = blend.blend_shares(exposure, sim_weights)
-    ranges = blend.disagreement_ranges([exposure, sim_weights or {}, blended])
+    if sim_weights is None:
+        # No similarity signal: the estimate IS the exposure prior and the
+        # temperature sweep has nothing to vary — a degenerate interval is
+        # the honest one.
+        ranges = {t: (v, v) for t, v in blended.items()}
+    else:
+        ranges = blend.temperature_sweep_ranges(exposure, scores, temperature)
 
     without_rights = [t for t in blended if t not in rights]
     if without_rights:

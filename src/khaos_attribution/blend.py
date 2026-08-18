@@ -25,9 +25,15 @@ The method, in full (this docstring is the reference the estimate's
 
 3. **Blend.** Posterior ∝ exposure × similarity weight, renormalised.
 
-4. **Ranges.** Per track: [min, max] across every method that ran
-   (exposure, similarity, blend). The interval is the disagreement between
-   methods — a share quoted outside it is a claim no method made.
+4. **Ranges.** Per track: [min, max] of the blend recomputed with the
+   softmax temperature halved and doubled. The temperature is the one
+   uncalibrated parameter (the leave-one-track-out study is its planned
+   calibration), so the interval answers "how much would this share move
+   if the calibration says we are sharpening twice too much, or half
+   enough?" — parameter sensitivity, not ingredient spread. The earlier
+   interval spanned raw exposure to raw similarity, two things that were
+   never candidate answers, and read as wider uncertainty than the
+   method actually has.
 
 5. **Money.** A party's share of the output = Σ over tracks
    (track influence × party's share of that track). Tracks without rights
@@ -42,7 +48,7 @@ import math
 
 import numpy as np
 
-ESTIMATOR_VERSION = "0.1.1"
+ESTIMATOR_VERSION = "0.2.0"
 # exposure_basis moved to a per-document string naming the data source
 # ("live Workshop store" / "bundled at artist import") — see estimator.py.
 TOP_K = 3            # segments per track that speak for it
@@ -97,6 +103,16 @@ def similarity_scores(output_embedding: np.ndarray,
     return scores
 
 
+def softmax_weights(scores: dict[str, float],
+                    temperature: float) -> dict[str, float]:
+    """Scores → weights at an explicit temperature (the sweep uses this)."""
+    values = np.array(list(scores.values()), dtype=np.float64)
+    logits = (values - values.max()) / temperature
+    weights = np.exp(logits)
+    weights /= weights.sum()
+    return dict(zip(scores.keys(), (float(w) for w in weights)))
+
+
 def similarity_weights(scores: dict[str, float]
                        ) -> tuple[dict[str, float] | None, float | None]:
     """Softmax the scores into weights, or (None, None) when uninformative.
@@ -112,10 +128,24 @@ def similarity_weights(scores: dict[str, float]
     if spread < SPREAD_FLOOR:
         return None, None
     temperature = spread
-    logits = (values - values.max()) / temperature
-    weights = np.exp(logits)
-    weights /= weights.sum()
-    return dict(zip(scores.keys(), (float(w) for w in weights))), temperature
+    return softmax_weights(scores, temperature), temperature
+
+
+TEMPERATURE_SWEEP = (0.5, 1.0, 2.0)
+
+
+def temperature_sweep_ranges(exposure: dict[str, float],
+                             scores: dict[str, float],
+                             temperature: float
+                             ) -> dict[str, tuple[float, float]]:
+    """Per-track [min, max] of the blend across the temperature sweep.
+
+    Contains the point estimate by construction (factor 1.0 is in the
+    sweep), so validator containment can never fail.
+    """
+    members = [blend_shares(exposure, softmax_weights(scores, temperature * f))
+               for f in TEMPERATURE_SWEEP]
+    return disagreement_ranges(members)
 
 
 def blend_shares(exposure: dict[str, float],

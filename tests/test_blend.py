@@ -174,3 +174,24 @@ def test_a_torn_bundle_is_refused_not_misattributed():
             rights={}, fallback_titles={},
             embedding_model=None, embedding_version=None,
             exposure_basis="test")
+
+
+def test_ranges_are_temperature_sensitivity_not_ingredient_spread():
+    """The range answers "how much would this share move if calibration says
+    we sharpen twice too much, or half enough" — it must contain the point
+    (factor 1.0 is in the sweep) and be narrower than the old raw
+    exposure-to-similarity interval that read as wider uncertainty than the
+    method actually has."""
+    exposure = {"a": 0.8, "b": 0.2}
+    scores = {"a": 0.30, "b": 0.60}
+    weights, temperature = blend.similarity_weights(scores)
+    blended = blend.blend_shares(exposure, weights)
+    ranges = blend.temperature_sweep_ranges(exposure, scores, temperature)
+    for track in exposure:
+        lo, hi = ranges[track]
+        assert lo <= blended[track] <= hi
+    old_lo = min(exposure["a"], weights["a"], blended["a"])
+    old_hi = max(exposure["a"], weights["a"], blended["a"])
+    lo, hi = ranges["a"]
+    assert (hi - lo) < (old_hi - old_lo), (
+        "the sweep interval should be tighter than the ingredient spread")
