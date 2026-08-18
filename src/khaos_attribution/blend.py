@@ -131,20 +131,26 @@ def similarity_weights(scores: dict[str, float]
     return softmax_weights(scores, temperature), temperature
 
 
+# The DEFAULT sweep, used when no catalogue calibration exists: a factor-2
+# robustness band by convention. A leave-one-track-out study replaces it
+# with a measured band per adapter.
 TEMPERATURE_SWEEP = (0.5, 1.0, 2.0)
 
 
 def temperature_sweep_ranges(exposure: dict[str, float],
                              scores: dict[str, float],
-                             temperature: float
+                             temperature: float,
+                             factors: tuple[float, ...] = TEMPERATURE_SWEEP
                              ) -> dict[str, tuple[float, float]]:
     """Per-track [min, max] of the blend across the temperature sweep.
 
-    Contains the point estimate by construction (factor 1.0 is in the
-    sweep), so validator containment can never fail.
+    `factors` must include 1.0 so the interval contains the point estimate
+    by construction and validator containment can never fail.
     """
+    if 1.0 not in factors:
+        factors = tuple(sorted({*factors, 1.0}))
     members = [blend_shares(exposure, softmax_weights(scores, temperature * f))
-               for f in TEMPERATURE_SWEEP]
+               for f in factors]
     return disagreement_ranges(members)
 
 

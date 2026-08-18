@@ -195,3 +195,31 @@ def test_ranges_are_temperature_sensitivity_not_ingredient_spread():
     lo, hi = ranges["a"]
     assert (hi - lo) < (old_hi - old_lo), (
         "the sweep interval should be tighter than the ingredient spread")
+
+
+def test_calibration_narrows_and_stamps_the_document():
+    """A calibrated document uses the measured band and says it is
+    calibrated; an uncalibrated one says that too. The two must never be
+    mistaken for each other."""
+    from khaos_attribution.estimator import build_estimate
+    common = dict(
+        generation_id="g", artist_id="a", adapter_version="r",
+        run_tracks={"x", "y"}, segment_counts={"x": 2, "y": 2},
+        n_training_pairs=4,
+        embeddings=np.array([[1, 0], [0.9, 0.436], [0, 1], [0.436, 0.9]],
+                            dtype=np.float32),
+        row_track_ids=["x", "x", "y", "y"],
+        output_embedding=np.array([1.0, 0.0], dtype=np.float32),
+        rights={}, fallback_titles={}, embedding_model=None,
+        embedding_version=None, exposure_basis="test")
+    plain = build_estimate(**common)
+    calibrated = build_estimate(**common, calibration={
+        "multiplier": 1.4, "band": [1.0, 2.0],
+        "source": "loto study (3 holdouts)"})
+    assert plain["method"]["temperature_calibration"] == "default (uncalibrated)"
+    assert calibrated["method"]["temperature_calibration"] == "loto study (3 holdouts)"
+    assert calibrated["method"]["temperature"] > plain["method"]["temperature"]
+    p_lo, p_hi = plain["influence"][0]["share_range_pct"]
+    c_lo, c_hi = calibrated["influence"][0]["share_range_pct"]
+    assert (c_hi - c_lo) < (p_hi - p_lo), (
+        "a measured band narrower than factor-2 must narrow the ranges")
