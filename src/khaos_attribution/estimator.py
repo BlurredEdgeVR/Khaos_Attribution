@@ -38,7 +38,8 @@ def build_estimate(*, generation_id: str, artist_id: str,
                    embedding_model: str | None,
                    embedding_version: str | None,
                    exposure_basis: str,
-                   extra_caveats: tuple[str, ...] = ()) -> dict:
+                   extra_caveats: tuple[str, ...] = (),
+                   calibration: dict | None = None) -> dict:
     """The full pipeline after embedding: exposure → similarity → blend →
     ranges → money → validated document.
 
@@ -46,6 +47,14 @@ def build_estimate(*, generation_id: str, artist_id: str,
     schema-valid track_rights record (validate_track_rights) — money math
     reads writers/publishers/title directly; and `exposure_basis` names the
     data source, the ONE field that legitimately differs between apps.
+
+    `calibration`, when present, is the result of a leave-one-track-out
+    study for THIS adapter's catalogue: {"multiplier": float,
+    "band": [lo, hi], "source": str}. The temperature becomes
+    spread × multiplier and the range sweep becomes the measured band
+    (relative to the multiplier). Absent, the defaults apply and the
+    method block says so — a calibrated and an uncalibrated document must
+    never be mistaken for each other.
 
     Raises ValueError when no training track has embeddings, or when the
     embedding index and array disagree — a torn bundle must fail loudly,
@@ -78,6 +87,15 @@ def build_estimate(*, generation_id: str, artist_id: str,
     scores = blend.similarity_scores(output_embedding, embeddings,
                                      row_track_ids, set(exposure))
     sim_weights, temperature = blend.similarity_weights(scores)
+    calibration_note = "default (uncalibrated)"
+    sweep = blend.TEMPERATURE_SWEEP
+    if calibration and sim_weights is not None:
+        multiplier = float(calibration["multiplier"])
+        temperature = temperature * multiplier
+        sim_weights = blend.softmax_weights(scores, temperature)
+        band_lo, band_hi = calibration["band"]
+        sweep = (float(band_lo) / multiplier, 1.0, float(band_hi) / multiplier)
+        calibration_note = calibration.get("source", "catalogue-calibrated")
     if sim_weights is None:
         caveats.append(
             "Single-track adapter: influence is the whole output by "
@@ -93,7 +111,8 @@ def build_estimate(*, generation_id: str, artist_id: str,
         # the honest one.
         ranges = {t: (v, v) for t, v in blended.items()}
     else:
-        ranges = blend.temperature_sweep_ranges(exposure, scores, temperature)
+        ranges = blend.temperature_sweep_ranges(exposure, scores, temperature,
+                                                factors=sweep)
 
     without_rights = [t for t in blended if t not in rights]
     if without_rights:
@@ -134,6 +153,7 @@ def build_estimate(*, generation_id: str, artist_id: str,
             "embedding_version": embedding_version,
             "similarity_informative": sim_weights is not None,
             "temperature": temperature,
+            "temperature_calibration": calibration_note,
         },
         "influence": influence,
         "splits": splits,
