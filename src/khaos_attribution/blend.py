@@ -48,7 +48,7 @@ import math
 
 import numpy as np
 
-ESTIMATOR_VERSION = "0.2.0"
+ESTIMATOR_VERSION = "0.3.0"
 # exposure_basis moved to a per-document string naming the data source
 # ("live Workshop store" / "bundled at artist import") — see estimator.py.
 TOP_K = 3            # segments per track that speak for it
@@ -183,6 +183,7 @@ def money_splits(blended: dict[str, float],
     """Writer and publisher shares of the output, with ranges, in percent."""
     writers: dict[str, dict] = {}
     publishers: dict[str, dict] = {}
+    masters: dict[str, dict] = {}
     unattributed = 0.0
 
     def _accumulate(pool: dict, name: str, fraction: float,
@@ -202,6 +203,8 @@ def money_splits(blended: dict[str, float],
             _accumulate(writers, w["name"], w["share_pct"], share, lo, hi)
         for p in rights["publishers"]:
             _accumulate(publishers, p["name"], p["share_pct"], share, lo, hi)
+        for m in rights.get("masters") or []:
+            _accumulate(masters, m["name"], m["share_pct"], share, lo, hi)
 
     def _pool(pool: dict) -> list[dict]:
         # The hi bound sums per-track maxima, which are INDEPENDENT method
@@ -217,4 +220,5 @@ def money_splits(blended: dict[str, float],
                                       key=lambda kv: -kv[1]["pct"])]
 
     return {"writers": _pool(writers), "publishers": _pool(publishers),
+            "masters": _pool(masters),
             "unattributed_pct": round(unattributed * 100, 4)}

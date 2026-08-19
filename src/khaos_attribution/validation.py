@@ -125,6 +125,8 @@ def validate_track_rights(record):
     _check_share_sum(record["writers"], "writers", "track rights record")
     _check_share_sum(record["publishers"], "publishers", "track rights record",
                      required=False)
+    _check_share_sum(record.get("masters") or [], "masters",
+                     "track rights record", required=False)
     return record
 
 
@@ -150,8 +152,8 @@ def validate_attribution_estimate(record):
                 f"Invalid attribution estimate: track {entry['track_id']} "
                 f"blended share {point:g} lies outside its own range "
                 f"[{lo:g}, {hi:g}]")
-    for pool in ("writers", "publishers"):
-        for party in record["splits"][pool]:
+    for pool in ("writers", "publishers", "masters"):
+        for party in record["splits"].get(pool) or []:
             lo, hi = party["share_range_pct"]
             if not (lo - _SHARE_TOLERANCE <= party["share_pct"] <= hi + _SHARE_TOLERANCE):
                 raise AttributionValidationError(

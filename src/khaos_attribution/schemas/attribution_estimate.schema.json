@@ -10,31 +10,63 @@
       "pattern": "^\\d+\\.\\d+\\.\\d+$",
       "const": "1.0.0"
     },
-    "generation_id": { "type": "string", "minLength": 1 },
-    "artist_id": { "type": "string", "minLength": 1 },
-    "adapter_version": { "type": "string", "minLength": 1 },
-    "created_at": { "type": "string", "format": "date-time" },
+    "generation_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "artist_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "adapter_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
     "method": {
       "type": "object",
-      "description": "Exactly how this estimate was computed — an estimate without its method is a rumour.",
+      "description": "Exactly how this estimate was computed \u2014 an estimate without its method is a rumour.",
       "properties": {
-        "estimator_version": { "type": "string", "minLength": 1 },
+        "estimator_version": {
+          "type": "string",
+          "minLength": 1
+        },
         "exposure_basis": {
           "type": "string",
           "description": "What the exposure prior counts, e.g. 'training segments per track'."
         },
-        "embedding_model": { "type": ["string", "null"] },
-        "embedding_version": { "type": ["string", "null"] },
+        "embedding_model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "embedding_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "similarity_informative": {
           "type": "boolean",
           "description": "False when the acoustic similarity spread across tracks was below the noise floor, in which case blended shares equal the exposure prior."
         },
         "temperature": {
-          "type": ["number", "null"],
+          "type": [
+            "number",
+            "null"
+          ],
           "description": "Softmax temperature used to turn similarity scores into weights; null when similarity was uninformative."
         }
       },
-      "required": ["estimator_version", "exposure_basis", "similarity_informative"],
+      "required": [
+        "estimator_version",
+        "exposure_basis",
+        "similarity_informative"
+      ],
       "additionalProperties": true
     },
     "influence": {
@@ -44,67 +76,142 @@
       "items": {
         "type": "object",
         "properties": {
-          "track_id": { "type": "string", "minLength": 1 },
-          "title": { "type": ["string", "null"] },
-          "exposure_share_pct": { "type": "number", "minimum": 0, "maximum": 100 },
-          "similarity_share_pct": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
-          "blended_share_pct": { "type": "number", "minimum": 0, "maximum": 100 },
+          "track_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "exposure_share_pct": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "similarity_share_pct": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100
+          },
+          "blended_share_pct": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100
+          },
           "share_range_pct": {
             "type": "array",
-            "description": "[low, high] — the disagreement interval across methods. A number outside this range is a claim no method made.",
-            "items": { "type": "number", "minimum": 0, "maximum": 100 },
+            "description": "[low, high] \u2014 the disagreement interval across methods. A number outside this range is a claim no method made.",
+            "items": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100
+            },
             "minItems": 2,
             "maxItems": 2
           }
         },
-        "required": ["track_id", "exposure_share_pct", "similarity_share_pct", "blended_share_pct", "share_range_pct"],
+        "required": [
+          "track_id",
+          "exposure_share_pct",
+          "similarity_share_pct",
+          "blended_share_pct",
+          "share_range_pct"
+        ],
         "additionalProperties": false
       }
     },
     "splits": {
       "type": "object",
-      "description": "The money math: each party's estimated share of this output, from track influence × their share of each track.",
+      "description": "The money math: each party's estimated share of this output, from track influence \u00d7 their share of each track.",
       "properties": {
         "writers": {
           "type": "array",
-          "items": { "$ref": "#/$defs/party_split" }
+          "items": {
+            "$ref": "#/$defs/party_split"
+          }
         },
         "publishers": {
           "type": "array",
-          "items": { "$ref": "#/$defs/party_split" }
+          "items": {
+            "$ref": "#/$defs/party_split"
+          }
         },
         "unattributed_pct": {
           "type": "number",
           "description": "Influence attributable to tracks with no rights record. Reported, never silently renormalised away.",
           "minimum": 0,
           "maximum": 100
+        },
+        "masters": {
+          "type": "array",
+          "description": "Recording-owner shares of the output, when any influencing track carries a masters pool.",
+          "items": {
+            "$ref": "#/$defs/party_split"
+          }
         }
       },
-      "required": ["writers", "publishers", "unattributed_pct"],
+      "required": [
+        "writers",
+        "publishers",
+        "unattributed_pct"
+      ],
       "additionalProperties": false
     },
     "caveats": {
       "type": "array",
       "description": "Everything the reader must know before quoting a number, in plain sentences.",
-      "items": { "type": "string" }
+      "items": {
+        "type": "string"
+      }
     }
   },
-  "required": ["schema_version", "generation_id", "artist_id", "adapter_version", "created_at", "method", "influence", "splits", "caveats"],
+  "required": [
+    "schema_version",
+    "generation_id",
+    "artist_id",
+    "adapter_version",
+    "created_at",
+    "method",
+    "influence",
+    "splits",
+    "caveats"
+  ],
   "additionalProperties": false,
   "$defs": {
     "party_split": {
       "type": "object",
       "properties": {
-        "name": { "type": "string", "minLength": 1 },
-        "share_pct": { "type": "number", "minimum": 0, "maximum": 100 },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "share_pct": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
         "share_range_pct": {
           "type": "array",
-          "items": { "type": "number", "minimum": 0, "maximum": 100 },
+          "items": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100
+          },
           "minItems": 2,
           "maxItems": 2
         }
       },
-      "required": ["name", "share_pct", "share_range_pct"],
+      "required": [
+        "name",
+        "share_pct",
+        "share_range_pct"
+      ],
       "additionalProperties": false
     }
   }
