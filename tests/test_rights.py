@@ -215,3 +215,53 @@ def test_empty_code_string_under_any_status_speaks_english():
         validate_track_rights(record)
     assert "does not match" not in str(exc.value)
     assert "empty code" in str(exc.value)
+
+
+def test_masters_pool_is_optional_but_must_add_up():
+    """The recording side (℗) joins the sheet in 0.10.0: optional — absence
+    means not yet recorded — but a partial pool is an error, same as
+    publishers."""
+    record = copy.deepcopy(GOOD_RIGHTS)
+    validate_track_rights(record)                     # no masters: fine
+    record["masters"] = [{"name": "Example Records", "share_pct": 100}]
+    validate_track_rights(record)
+    record["masters"] = [{"name": "Example Records", "share_pct": 60}]
+    with pytest.raises(AttributionValidationError, match="masters"):
+        validate_track_rights(record)
+
+
+def test_performers_are_credits_not_money():
+    record = copy.deepcopy(GOOD_RIGHTS)
+    record["performers"] = [{"name": "Ava Example", "role": "vocals"},
+                            {"name": "Ben Sample", "role": "drums"}]
+    validate_track_rights(record)
+    record["performers"] = [{"name": "Ava Example", "role": "vocals",
+                             "share_pct": 50}]
+    with pytest.raises(AttributionValidationError):
+        validate_track_rights(record)                 # shares are refused
+
+
+def test_model_card_structured_consent_is_optional_and_validated():
+    from khaos_attribution import validate_model_card
+    card = {
+        "schema_version": "1.0.0", "artist_name": "Ava Example",
+        "artist_id": "artist-0001",
+        "consent_statement": "Ava consents to training on the listed tracks.",
+        "training_catalogue": [{"title": "Glasshouse", "duration": 214.5}],
+        "training_date": "2026-07-01", "adapter_version": "0.3.1",
+        "base_model": "khaos-audio-base-1", "base_model_licence": "MIT",
+    }
+    validate_model_card(copy.deepcopy(card))          # old cards stay valid
+    card.update({
+        "credit_line": "Ava Example",
+        "phonogram_notice": "℗ 2026 Ava Example",
+        "copyright_notice": "© 2026 Ava Example",
+        "consent": {"party": "Ava Example", "capacity": "artist",
+                    "scope": {"train": True, "generate": "operator_only",
+                              "commercial_outputs": False},
+                    "date": "2026-08-19", "text_version": "1"},
+    })
+    validate_model_card(copy.deepcopy(card))
+    card["consent"]["capacity"] = "someone"
+    with pytest.raises(AttributionValidationError):
+        validate_model_card(card)

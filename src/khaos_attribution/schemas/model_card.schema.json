@@ -45,10 +45,13 @@
           },
           "vocal": {
             "type": "boolean",
-            "description": "True if the track has sung vocals, false if instrumental. Optional — cards written before khaos-attribution 0.4.1 predate this field."
+            "description": "True if the track has sung vocals, false if instrumental. Optional \u2014 cards written before khaos-attribution 0.4.1 predate this field."
           }
         },
-        "required": ["title", "duration"],
+        "required": [
+          "title",
+          "duration"
+        ],
         "additionalProperties": false
       }
     },
@@ -72,6 +75,76 @@
       "type": "string",
       "description": "Licence under which the base model is distributed.",
       "minLength": 1
+    },
+    "credit_line": {
+      "type": "string",
+      "description": "How the artist is credited on outputs \u2014 presentation only, never a rights claim."
+    },
+    "phonogram_notice": {
+      "type": "string",
+      "description": "The \u2117 notice (sound recordings \u2014 what the adapter trains on)."
+    },
+    "copyright_notice": {
+      "type": "string",
+      "description": "The \u00a9 notice (compositions)."
+    },
+    "consent": {
+      "type": "object",
+      "description": "Structured consent behind the human-readable statement: who, in what capacity, to what scope, when, under which wording version.",
+      "properties": {
+        "party": {
+          "type": "string",
+          "minLength": 1
+        },
+        "capacity": {
+          "type": "string",
+          "enum": [
+            "artist",
+            "band_representative",
+            "label_representative",
+            "estate",
+            "other"
+          ]
+        },
+        "scope": {
+          "type": "object",
+          "properties": {
+            "train": {
+              "type": "boolean"
+            },
+            "generate": {
+              "type": "string",
+              "enum": [
+                "operator_only",
+                "platform_users"
+              ]
+            },
+            "commercial_outputs": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "train",
+            "generate",
+            "commercial_outputs"
+          ],
+          "additionalProperties": false
+        },
+        "date": {
+          "type": "string",
+          "format": "date"
+        },
+        "text_version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "party",
+        "capacity",
+        "scope",
+        "date"
+      ],
+      "additionalProperties": false
     }
   },
   "required": [
