@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "khaos_attribution"
-version = "0.10.0"
+version = "0.11.0"
 description = "JSON schemas and validators for artist attribution: provenance records and model cards."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -25,4 +25,4 @@ test = ["pytest>=7"]
 where = ["src"]
 
 [tool.setuptools.package-data]
-khaos_attribution = ["schemas/*.json"]
+khaos_attribution = ["schemas/*.json", "legacy_watermark_ids.json"]

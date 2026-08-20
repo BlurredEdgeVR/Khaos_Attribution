@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tombstone.schema.json",
+  "title": "OutputTombstone",
+  "description": "Written when an output is deleted (watermarking v2 \u00a76): the audio goes, the fact it existed is kept, so deleted material found in the wild is still identifiable. Lives at outputs/<artist>/.tombstones/<generation_id>.json and syncs like every canonical file.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "generation_id",
+    "artist_id",
+    "content_sha256",
+    "deleted_at_utc"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "enum": [
+        "1.0.0"
+      ]
+    },
+    "generation_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "artist_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "run_id": {
+      "type": "string",
+      "description": "The adapter run that generated it."
+    },
+    "watermark_id": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 65535,
+      "description": "The codeword the audio carried."
+    },
+    "content_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "deleted_at_utc": {
+      "type": "string",
+      "minLength": 1
+    },
+    "fingerprint_version": {
+      "type": "string",
+      "description": "Format of the fingerprints array; v1 is defined at phase 5."
+    },
+    "fingerprints": {
+      "type": "array",
+      "items": {
+        "type": "integer"
+      },
+      "description": "Landmark hashes of the deleted audio, for wild identification."
+    }
+  }
+}

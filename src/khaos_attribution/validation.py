@@ -112,6 +112,12 @@ def _check_code_fields(record, record_kind):
                 f"{key.upper()} — {hint}.")
 
 
+def validate_tombstone(record):
+    """Validate an output tombstone (watermarking v2 §6) — written at
+    deletion so deleted material stays identifiable in the wild."""
+    _validate(record, "tombstone.schema.json", "output tombstone")
+
+
 def validate_track_rights(record):
     """Validate a track rights record; raise AttributionValidationError if invalid.
 

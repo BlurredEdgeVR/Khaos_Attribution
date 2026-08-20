@@ -112,9 +112,68 @@ def watermark_issuer(codeword: int) -> str | None:
     return None
 
 
+# ---- watermarking v2: model-level allocation (docs/watermarking-v2.md) ----
+#
+# One ID per training run, allocated at training completion into the model
+# card. The payload space is partitioned per TRAINING MACHINE (bands), so
+# three machines allocate without coordination; payloads ever issued by the
+# retired per-output scheme are frozen out (legacy_watermark_ids.json) so a
+# decoded ID is owned by at most one thing.
+
+MACHINE_BANDS: dict[str, range] = {
+    "reserved":     range(0, 32),      # calibration + migration tooling
+    "laptop":       range(32, 704),
+    "studio":       range(704, 1376),
+    "threadripper": range(1376, 2048),
+}
+
+_LEGACY_IDS = None
+
+
+def legacy_watermark_ids() -> frozenset:
+    """The frozen set of pre-v2 per-output codewords (package data)."""
+    global _LEGACY_IDS
+    if _LEGACY_IDS is None:
+        import json  # noqa: PLC0415
+        from importlib.resources import files  # noqa: PLC0415
+        data = json.loads(files("khaos_attribution")
+                          .joinpath("legacy_watermark_ids.json").read_text())
+        _LEGACY_IDS = frozenset(int(c) for c in data["codewords"])
+    return _LEGACY_IDS
+
+
+def allocate_model_watermark_id(band: str, used: set[int]) -> int | None:
+    """A fresh run codeword from this machine's band, or None when the band
+    is exhausted (the caller must fail LOUDLY — a run may not complete
+    unmarked). `used` is the set of codewords already present in model
+    cards; the frozen legacy payloads are excluded automatically."""
+    if band not in MACHINE_BANDS:
+        raise ValueError(f"Unknown watermark band {band!r} — one of "
+                         f"{sorted(MACHINE_BANDS)}")
+    legacy_payloads = {decode_codeword(c)[0] for c in legacy_watermark_ids()
+                      if decode_codeword(c) is not None}
+    band_range = MACHINE_BANDS[band]
+    for _ in range(64):
+        payload = band_range.start + secrets.randbelow(len(band_range))
+        if payload in legacy_payloads:
+            continue
+        candidate = encode_payload(payload)
+        if candidate not in used:
+            return candidate
+    for payload in band_range:   # dense band: walk deterministically
+        if payload in legacy_payloads:
+            continue
+        candidate = encode_payload(payload)
+        if candidate not in used:
+            return candidate
+    log.error("Watermark band %r exhausted (%d payloads)", band, len(band_range))
+    return None
+
+
 def allocate_watermark_id(used: set[int], issuer: str = "platform") -> int | None:
-    """A fresh codeword from the issuer's partition that no stored output
-    already carries, or None when the partition is exhausted."""
+    """DEPRECATED (watermarking v2): per-output allocation is retired —
+    new audio carries its model's run ID (allocate_model_watermark_id).
+    Kept only so legacy code paths keep working until phase 4 lands."""
     payload_range = PAYLOAD_RANGES[issuer]
     span = len(payload_range)
     for _ in range(64):
@@ -186,6 +245,39 @@ class Watermarker:
         delta = torchaudio.functional.resample(delta16, _SAMPLE_RATE, sample_rate)[0, 0]
         marked = (wav + delta[: wav.shape[-1]]).clamp(-1.0, 1.0)
         return marked.T.contiguous().numpy()
+
+    @staticmethod
+    def decode_consistent(audio, sample_rate: int, *, window_s: float = 6.0,
+                          hop_s: float = 3.0) -> tuple[float, int | None]:
+        """(presence probability, codeword or None) with the v2 consistency
+        gate (docs/watermarking-v2.md §0): the ID is asserted only when the
+        whole-clip decode and the windowed decodes agree on one valid
+        codeword. Measured behaviour: mid-file excerpts flip 3-4 message
+        bits at detection prob ~1.0 and their windows DISAGREE with each
+        other, so this gate refuses (returns None) instead of asserting a
+        miscorrected ID — presence stays trustworthy either way."""
+        import numpy as np  # noqa: PLC0415
+
+        whole_prob, whole_id, _ = Watermarker.detect_array(audio, sample_rate)
+        if whole_id is None:
+            return whole_prob, None
+        window = int(window_s * sample_rate)
+        hop = int(hop_s * sample_rate)
+        agree = disagree = 0
+        for start in range(0, max(1, len(audio) - window + 1), hop):
+            segment = np.ascontiguousarray(audio[start:start + window])
+            if len(segment) < sample_rate:
+                continue
+            _, got, _ = Watermarker.detect_array(segment, sample_rate)
+            if got == whole_id:
+                agree += 1
+            elif got is not None:
+                disagree += 1
+        # Short clips may yield a single window; consistency then means
+        # "nothing contradicted the whole-clip decode".
+        if disagree == 0 and agree >= 1:
+            return whole_prob, whole_id
+        return whole_prob, None
 
     @staticmethod
     def detect_array(audio, sample_rate: int) -> tuple[float, int | None, bool]:

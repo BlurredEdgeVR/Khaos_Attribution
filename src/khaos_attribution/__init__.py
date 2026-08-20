@@ -6,6 +6,7 @@ from khaos_attribution.validation import (
     validate_attribution_estimate,
     validate_model_card,
     validate_provenance_record,
+    validate_tombstone,
     validate_track_rights,
 )
 
@@ -13,7 +14,7 @@ from khaos_attribution.validation import (
 # Each matches the `const` on `schema_version` in the corresponding bundled schema;
 # any other value is rejected by validation.
 PROVENANCE_SCHEMA_VERSION = "1.0.0"
-MODEL_CARD_SCHEMA_VERSION = "1.0.0"
+MODEL_CARD_SCHEMA_VERSION = "1.1.0"  # writers stamp the newest; 1.0.0 still validates
 TRACK_RIGHTS_SCHEMA_VERSION = "1.0.0"
 ATTRIBUTION_ESTIMATE_SCHEMA_VERSION = "1.0.0"
 
@@ -27,6 +28,7 @@ __all__ = [
     "validate_attribution_estimate",
     "validate_model_card",
     "validate_provenance_record",
+    "validate_tombstone",
     "validate_track_rights",
 ]
 

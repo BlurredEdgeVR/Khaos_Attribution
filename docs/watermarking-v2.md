@@ -1,11 +1,43 @@
 # Watermarking v2 — model-level identity, the provenance index, and fingerprints
 
-Status: **approved design, not yet implemented** (operator decisions recorded
-2026-08-20; adversarially reviewed the same day — 10 findings folded in).
+Status: **approved design, in implementation** (operator decisions recorded
+2026-08-20; adversarially reviewed the same day — 10 findings folded in;
+**Phase 0 measured 2026-08-20 and two amendments applied — §0**).
 Supersedes the per-output allocation scheme described in
 `khaos_attribution/watermark.py`'s docstring; the codec and embedding
 machinery there are retained. Implementation lands as one contract bump
 (**0.10.0 → 0.11.0**) with the usual uv.lock checklist across consumers.
+
+## 0. Phase-0 measurements and the two amendments they forced
+
+Measured on real generated outputs (scripts/watermark_survival.py,
+2026-08-20, laptop):
+
+- **Codecs are safe**: MP3 128/320k, AAC 128k, Opus 96k, Vorbis q4
+  (Wwise's music codec), 44.1k resample — detection prob ≥ 0.997 and the
+  ID decodes correctly (SECDED correcting ≤1 bit as designed).
+- **Mid-file excerpts break the MESSAGE, not the presence**: a 10 s
+  excerpt from anywhere past the start decodes with 3–4 flipped bits at
+  detection prob ≈ 1.0. No affordable code fixes 3–4 errors in 16 bits
+  (t=2 would not help — the 2048/1-bit decision stands, now for a better
+  reason), and windowed majority voting does not rescue it (windows
+  disagree with each other). This weakness exists in the CURRENT
+  per-output scheme too; phase 0 merely measured it.
+- **Double-embedding corrupts**: embedding a second AudioSeal message
+  over an already-marked file yields garbage decodes for BOTH messages.
+
+Amendments:
+
+1. **The re-embed migration is cancelled** (supersedes the §7 decision it
+   was built on — the operator chose re-embed before this was measurable).
+   Legacy outputs keep their per-output IDs; `legacy_ids` resolves them
+   forever. The provenance sidecar schema needs no change at all.
+2. **Consistency-gated decode** joins the contract: the ID is asserted
+   only when the whole-clip decode and windowed decodes agree on one
+   valid codeword. Excerpt windows disagree with each other, so the gate
+   refuses automatically — /verify then reports *presence* (solid on
+   every transform) and resolves identity via fingerprints (§5), which is
+   the layer built for exactly this.
 
 ## 1. Threat model (decided)
 
@@ -29,8 +61,9 @@ rights catalogue*. Exact-output identity moves to the fingerprint layer.
 Scheme: **AudioSeal, unchanged** (decided): 16-bit payload carrying the
 existing extended-Hamming (16,11) SECDED codeword — **2048 usable
 payloads, 1-bit correction** (operator chose ID headroom over stronger
-correction; revisit only if the Phase-0 survival test fails on decode
-accuracy).
+correction). Phase 0 (§0) validated this for whole files and codecs and
+showed excerpt decode fails at ANY affordable code strength — the
+consistency gate + fingerprints answer excerpts, not more ECC.
 
 **One number system (review finding 2).** `watermark_id` everywhere — in
 model cards, sidecars, the index, and /verify responses — is the 16-bit
@@ -105,7 +138,7 @@ without watermark identity") — it never writes (decided).
 |---|---|---|
 | `models` | watermark_id → run_id, artist_id, adapter_hash, consent snapshot, card path | model cards (both homes) |
 | `outputs` | generation_id → model, audio path, sidecar path, created_at | provenance sidecars (Platform outputs + Workshop auditions) |
-| `legacy_ids` | legacy watermark_id → generation_id | the frozen legacy list + sidecars' `watermark_id_legacy` |
+| `legacy_ids` | legacy watermark_id → generation_id | the frozen legacy list + a sidecar scan (sidecars keep their original `watermark_id`) |
 | `fingerprints` | landmark hash → generation_id, offset | stored audio (mixes + stems) |
 | `tombstones` | content hash + fingerprints of deleted outputs → model, deleted_at | tombstone record files (§6) — canonical, so the table IS rebuildable |
 
@@ -174,48 +207,36 @@ Adapter run: run_20260806_220058 (6 Aug 2026)
 Exact output: matched — generation f3a1… (99.2%)
 ```
 
-## 7. Migration (decided: re-embed the legacy outputs)
+## 7. Migration (amended by §0: NO re-embedding)
 
-All existing watermarked audio — the Platform outputs **and the Workshop
-auditions** (review finding 7) — is re-embedded with its model's run ID.
-This touches pinned provenance, so the exception is carved explicitly and
-narrowly:
+Measured double-embed corruption cancels the re-embed plan. Instead:
 
-- The stored master is re-embedded; the sidecar gains an **additive**
-  `watermark_id_legacy` preserving the original ID, and `watermark_id`
-  becomes the run codeword. No other sidecar field changes. One-time,
-  logged, not a precedent.
-- **Mechanics the migration tool must honour** (review finding 8):
-  1. RIFF LIST/INFO attribution chunks appended to audition WAVs are
-     preserved across the rewrite (read chunk → re-embed → re-append; a
-     naive `sf.write` drops them).
-  2. Order: masters re-embed **first**, then stems caches are invalidated
-     (the mtime bump does this; the tool verifies no stems cache predates
-     its migrated master).
-  3. Attribution estimates computed on pre-migration audio are re-run
-     afterwards (cheap at this scale) so no estimate describes audio that
-     no longer exists.
-- Wild copies of the *original* files still resolve via `legacy_ids` —
-  that is what the frozen legacy list is for.
+- Existing outputs (Platform and Workshop auditions) keep their
+  per-output IDs untouched — audio and sidecars are not modified at all.
+- The frozen legacy list (§3) plus a sidecar scan builds `legacy_ids`,
+  so every legacy ID resolves to its exact output permanently.
+- The served adapters' model cards are backfilled with run IDs (§3);
+  only audio generated AFTER phase 4 carries them.
 - **Sequencing across machines** (review finding 5): the 0.11.0 pin bump
-  deploys on **all three machines before any file migration writes new
-  fields**. The 0.11.0 schemas accept both old and new files: new fields
-  are optional/additive and `schema_version` becomes an enumeration of
-  the accepted versions rather than a single const — a synced migrated
-  sidecar must never take down a 0.11.0 machine, and the migration must
-  never run while any machine is still pinned to 0.10.x.
+  deploys on all three machines before any card backfill writes the new
+  field. The 0.11.0 model-card schema accepts both versions
+  (`schema_version` enumerates 1.0.0 and 1.1.0; `watermark_id` optional)
+  so a backfilled card syncing to a not-yet-bumped machine is the only
+  forbidden state — bump first, backfill second.
 
 ## 8. Contract changes in khaos-attribution 0.11.0 (one bump, decided)
 
 1. `model_card.schema.json`: `watermark_id` (codeword, 0–65535, must
    decode to a valid payload; required for new cards, optional for
    pre-v2 cards).
-2. Provenance sidecar schema: `watermark_id_legacy` (optional, additive);
-   `schema_version` accepts old and new values (§7 sequencing).
+2. Provenance sidecar schema: **unchanged** (§0 amendment 1 — no
+   migration fields needed).
 3. Tombstone record schema (new).
 4. `watermark.py`: `allocate_model_watermark_id(band, used)` honouring
-   the frozen legacy exclusion; per-output `allocate_watermark_id`
-   deprecated (decode/issuer retained for the legacy list only).
+   the frozen legacy exclusion; `decode_consistent()` — the
+   consistency-gated decode of §0 amendment 2; per-output
+   `allocate_watermark_id` deprecated (decode/issuer retained for the
+   legacy list only).
 5. `legacy_watermark_ids.json` frozen list shipped as package data.
 6. Provenance-index schema doc (DDL + rebuild/staleness/concurrency
    rules) and fingerprint format doc.
@@ -229,7 +250,7 @@ narrowly:
 | 1 | 0.11.0 contract (schemas, allocation, frozen legacy list, docs); pins bumped on all three machines | the contract |
 | 2 | Workshop allocates at training completion; card backfill for served adapters | allocation |
 | 3 | **/verify v2 lands** — models-then-legacy resolution, no-card wording, match-with-confidence | the old first-sidecar-wins lookup dies BEFORE any run ID is ever embedded |
-| 4 | Both apps embed run IDs; stems re-embed run IDs; legacy re-embed migration (tool per §7) | embedding |
+| 4 | Both apps embed run IDs on NEW audio; stems keep re-embedding their source's codeword (same message twice is benign; a DIFFERENT message is not — §0) | embedding |
 | 5 | Index builder + fingerprinter (mixes + stems); tombstone flow; Engine Room read-only view | the index |
 
 The old /verify resolves per-output IDs and returns the **first matching

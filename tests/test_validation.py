@@ -142,10 +142,11 @@ def test_exported_constants_match_schema_const():
         PROVENANCE_SCHEMA_VERSION
         == provenance_schema["properties"]["schema_version"]["const"]
     )
-    assert (
-        MODEL_CARD_SCHEMA_VERSION
-        == card_schema["properties"]["schema_version"]["const"]
-    )
+    # The card schema accepts BOTH versions mid-migration (watermarking
+    # v2); the exported constant is what writers stamp — the newest.
+    accepted = card_schema["properties"]["schema_version"]["enum"]
+    assert MODEL_CARD_SCHEMA_VERSION == max(accepted)
+    assert "1.0.0" in accepted
 
 
 def test_catalogue_vocal_flag_optional_and_boolean():
@@ -162,3 +163,34 @@ def test_catalogue_vocal_flag_optional_and_boolean():
     card["training_catalogue"][0]["vocal"] = "yes"
     with pytest.raises(AttributionValidationError):
         validate_model_card(card)
+
+
+def test_tombstone_validates_and_refuses_garbage():
+    from khaos_attribution import AttributionValidationError, validate_tombstone
+    good = {"schema_version": "1.0.0", "generation_id": "g1",
+            "artist_id": "art", "content_sha256": "0" * 64,
+            "deleted_at_utc": "2026-08-20T12:00:00Z",
+            "watermark_id": 1782, "run_id": "run_x",
+            "fingerprint_version": "v1", "fingerprints": [1, 2, 3]}
+    validate_tombstone(good)
+    import pytest
+    with pytest.raises(AttributionValidationError):
+        validate_tombstone({**good, "content_sha256": "short"})
+    with pytest.raises(AttributionValidationError):
+        validate_tombstone({k: v for k, v in good.items()
+                            if k != "deleted_at_utc"})
+
+
+def test_model_card_accepts_watermark_id_and_both_versions():
+    # 1.1.0 adds the optional field; 1.0.0 cards (no field) must keep
+    # validating so cards sync between machines mid-migration.
+    base = copy.deepcopy(GOOD_MODEL_CARD)
+    validate_model_card(base)                       # 1.0.0, no watermark_id
+    card = copy.deepcopy(GOOD_MODEL_CARD)
+    card["schema_version"] = "1.1.0"
+    card["watermark_id"] = 52464
+    validate_model_card(card)
+    bad = copy.deepcopy(GOOD_MODEL_CARD)
+    bad["watermark_id"] = 99999999
+    with pytest.raises(AttributionValidationError):
+        validate_model_card(bad)

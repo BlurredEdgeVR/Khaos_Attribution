@@ -1,0 +1,29 @@
+{
+  "description": "Every per-output watermark codeword ever issued before watermarking v2 (docs/watermarking-v2.md \u00a73). FROZEN: collected 2026-08-20 from the Platform ledger, Platform output sidecars and Workshop audition sidecars on the laptop. These payloads are permanently excluded from run allocation so no ID is ever owned by both a legacy output and a model.",
+  "frozen_at": "2026-08-20",
+  "codewords": [
+    1782,
+    8520,
+    8685,
+    10267,
+    11051,
+    11240,
+    16770,
+    19234,
+    19931,
+    19988,
+    21964,
+    26277,
+    34680,
+    34770,
+    34996,
+    36237,
+    41977,
+    42495,
+    45611,
+    59262,
+    59518,
+    61108,
+    64515
+  ]
+}
