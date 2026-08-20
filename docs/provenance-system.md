@@ -98,8 +98,9 @@ matching stands alone.
 **Rights ride the answer** (2026-08-20): an identified output brings its
 computed attribution estimate's splits — writers, publishers, masters ℗,
 unattributed % — when the estimate exists; its absence is stated (with
-the Compute remedy), and a deleted output says its estimate went with
-it. A model-level answer states the catalogue's rights coverage counted
+the Compute remedy), a Workshop audition says estimates are computed for
+Listening Space outputs, and a deleted output says its estimate went
+with it. A model-level answer states the catalogue's rights coverage counted
 from the artist bundle, never just asserted.
 
 ## The fingerprint layer
@@ -123,7 +124,10 @@ sync). Tables: models, outputs, legacy_ids, fingerprints, tombstones.
 Refresh is a file scan swapped in one short transaction — a row whose
 canonical file is gone simply isn't re-inserted. One background worker
 fingerprints queued audio; /verify never blocks on it and says
-"catching up" when it lags. Delete the file any time; the next server
+"catching up" when it lags. A verify that decodes a watermark but finds
+no content match triggers one on-demand rescan, so a fresh Workshop
+audition becomes matchable without a server restart (its first ask may
+still say "catching up"; the next one matches). Delete the file any time; the next server
 start rebuilds it.
 
 The **Engine Room** reads the index (strictly read-only) and reports:
