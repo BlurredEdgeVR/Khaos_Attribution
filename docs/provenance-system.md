@@ -92,6 +92,13 @@ re-embedding the *same* codeword is fine.
 /verify works even on a machine without audioseal installed — content
 matching stands alone.
 
+**Rights ride the answer** (2026-08-20): an identified output brings its
+computed attribution estimate's splits — writers, publishers, masters ℗,
+unattributed % — when the estimate exists; its absence is stated (with
+the Compute remedy), and a deleted output says its estimate went with
+it. A model-level answer states the catalogue's rights coverage counted
+from the artist bundle, never just asserted.
+
 ## The fingerprint layer
 
 In-house landmark constellation (`khaos_attribution/fingerprint.py`,
