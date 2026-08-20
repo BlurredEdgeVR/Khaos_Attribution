@@ -1,8 +1,10 @@
 # Watermarking v2 — model-level identity, the provenance index, and fingerprints
 
-Status: **approved design, in implementation** (operator decisions recorded
-2026-08-20; adversarially reviewed the same day — 10 findings folded in;
-**Phase 0 measured 2026-08-20 and two amendments applied — §0**).
+Status: **implemented 2026-08-20** (operator decisions recorded; spec
+adversarially reviewed — 10 findings folded in; Phase 0 measured, two
+amendments applied (§0); phases 1–5 built same day, each review-passed.
+Outstanding: the Wwise-conversion leg of phase 0 waits for the Wwise
+MCP — Vorbis, Wwise's music codec, already passes).
 Supersedes the per-output allocation scheme described in
 `khaos_attribution/watermark.py`'s docstring; the codec and embedding
 machinery there are retained. Implementation lands as one contract bump
@@ -244,14 +246,19 @@ Measured double-embed corruption cancels the re-embed plan. Instead:
 
 ## 9. Phases — reordered so /verify never misattributes (review finding 3)
 
-| phase | what | proves |
+| phase | what | status |
 |---|---|---|
-| 0 | Wwise/codec survival test of AudioSeal decode at current SECDED (already pending) | the 1-bit-correction decision holds; failure reopens §2's ECC knob |
-| 1 | 0.11.0 contract (schemas, allocation, frozen legacy list, docs); pins bumped on all three machines | the contract |
-| 2 | Workshop allocates at training completion; card backfill for served adapters | allocation |
-| 3 | **/verify v2 lands** — models-then-legacy resolution, no-card wording, match-with-confidence | the old first-sidecar-wins lookup dies BEFORE any run ID is ever embedded |
-| 4 | Both apps embed run IDs on NEW audio; stems keep re-embedding their source's codeword (same message twice is benign; a DIFFERENT message is not — §0) | embedding |
-| 5 | Index builder + fingerprinter (mixes + stems); tombstone flow; Engine Room read-only view | the index |
+| 0 | Codec survival test (scripts/watermark_survival.py) | **done** — codecs pass; the excerpt/double-embed findings drove §0's amendments. Wwise-conversion leg waits for the Wwise MCP |
+| 1 | Contract 0.11.x: schemas, band allocation, frozen legacy list, decode_consistent, fingerprint v1, tombstone schema, index DDL doc | **done** (tags v0.11.0–v0.11.2; consumers pinned) |
+| 2 | Workshop allocates at training completion; the four served adapters backfilled in both homes | **done** |
+| 3 | /verify v2: models-then-legacy resolution, consistency gate, no-card wording — landed BEFORE any run ID was embedded | **done** |
+| 4 | Both apps embed run IDs on new audio; stems keep re-embedding their source's codeword | **done** |
+| 5 | Provenance index + fingerprint worker + content matching in /verify + tombstones on delete + Engine Room read-only coverage check | **done** (mixes fingerprinted; stems queue when exported — §10) |
+
+Implementation notes: /verify also stands WITHOUT the watermarker —
+content matching answers alone; the index lives at
+`outputs/provenance_index.sqlite3`, one background fingerprint worker,
+WAL mode.
 
 The old /verify resolves per-output IDs and returns the **first matching
 sidecar** — under shared run IDs that is live misattribution, which is
@@ -262,8 +269,10 @@ audit) and suites green in every touched repo.
 
 ## 10. Open review points
 
-- Landmark fingerprint implementation: small dependency vs ~200-line
-  in-house DSP (decide at phase 5; in-house preferred if it stays small).
+- ~~Landmark fingerprint implementation~~ decided: in-house v1
+  (khaos_attribution/fingerprint.py, numpy-only).
+- Stems fingerprinting: the schema carries `kind`, but only mixes queue
+  today — wire stem exports into the queue when stems next get attention.
 - Whether /verify rate-limits or logs lookups (product question, phase 5).
 - Reserved band usage beyond calibration (currently 32 payloads, none
   wired to anything — deliberately idle until a need is named).
