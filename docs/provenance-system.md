@@ -2,7 +2,7 @@
 
 Current-state reference (2026-08-20). The *decisions and their reasons*
 live in `watermarking-v2.md`; this page describes the running system.
-Contract version: khaos-attribution **0.11.3**.
+Contract version: khaos-attribution **0.11.4**.
 
 ## In one paragraph
 
@@ -38,12 +38,15 @@ index rebuilt from them.
 | 10 s mid-file excerpt | ✓ (~1.0) | ✗ (3–4 bits flip) |
 | adversarial removal | — | — (out of scope: this is provenance, not DRM) |
 
-Because excerpts break the *message* but never the *presence*, the ID is
-only asserted when whole-clip and windowed decodes agree (the
-**consistency gate**, `decode_consistent`). An excerpt therefore reports
-"KHAOS-made, identity via content match" instead of resolving a
-mis-corrected ID to the wrong model. Never embed a second watermark over
-a marked file — two messages superimpose into garbage (measured); stems
+Excerpts break the *message* but never the *presence* — and the
+miscorrection is **deterministic** (an excerpt's windows agree on the
+same wrong codeword; measured live 2026-08-20), so no decode-side gate
+can catch it. /verify therefore resolves **content first**: a
+fingerprint match names the exact output and its run, and the decoded
+payload is reported as corroboration — confirmed, "didn't survive this
+copy", or absent. A raw ID resolves alone only when no content evidence
+exists (worded "uncorroborated"). Never embed a second watermark over a
+marked file — two messages superimpose into garbage (measured); stems
 re-embedding the *same* codeword is fine.
 
 ## How IDs are allocated
@@ -84,7 +87,7 @@ re-embedding the *same* codeword is fine.
 | watermark decodes to a served model | **artist-led**: "Made with the *Artist* adapter — consent on file · N catalogue tracks · run + date", plus the exact-output match when content confirms one |
 | ID is one of the 23 frozen legacy IDs | the original per-output answer (Platform record, or "Workshop test render") |
 | valid ID, no card on this machine | "watermark confirmed; this machine doesn't have the model's card yet — sync adapters" |
-| ID inconsistent (excerpts) | "KHAOS watermark present; the identity payload didn't survive this copy" + content match if found |
+| excerpt (payload mismatches the matched output) | the full artist-led answer via content, flagged "the embedded ID didn't survive this copy — identity confirmed by content match" |
 | no watermark, content matches | "No watermark detected, but this audio matches output X (N aligned landmarks)" — always a match with numbers, never a definitive claim |
 | deleted output | any of the above, flagged "since deleted — identified from its tombstone" |
 | fingerprinting can't read the file | says so ("content matching could not read this file format") instead of pretending no match |
