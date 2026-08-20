@@ -34,12 +34,18 @@ Amendments:
    was built on — the operator chose re-embed before this was measurable).
    Legacy outputs keep their per-output IDs; `legacy_ids` resolves them
    forever. The provenance sidecar schema needs no change at all.
-2. **Consistency-gated decode** joins the contract: the ID is asserted
-   only when the whole-clip decode and windowed decodes agree on one
-   valid codeword. Excerpt windows disagree with each other, so the gate
-   refuses automatically — /verify then reports *presence* (solid on
-   every transform) and resolves identity via fingerprints (§5), which is
-   the layer built for exactly this.
+2. **Content-corroborated identity** (revised after live measurement
+   2026-08-20): windowed-agreement gating turned out NOT to discriminate
+   — mid-file windows misdecode even on full files, and an excerpt's
+   miscorrection is deterministic (its own windows agree on the same
+   wrong codeword). The working rule: /verify matches CONTENT first; a
+   fingerprint match names the exact output and its run, and the decoded
+   payload is reported as corroboration — confirmed, contradicted
+   ("didn't survive this copy"), or absent. Only when no content match
+   exists does the raw decoded ID resolve alone (full foreign-machine
+   files decode correctly; the residual risk — an excerpt of unindexed
+   audio miscorrecting onto an allocated model ID — is ~models/2048 and
+   the wording stays match-based).
 
 ## 1. Threat model (decided)
 
