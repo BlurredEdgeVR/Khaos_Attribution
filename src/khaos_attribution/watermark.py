@@ -249,13 +249,15 @@ class Watermarker:
     @staticmethod
     def decode_consistent(audio, sample_rate: int, *, window_s: float = 6.0,
                           hop_s: float = 3.0) -> tuple[float, int | None]:
-        """(presence probability, codeword or None) with the v2 consistency
-        gate (docs/watermarking-v2.md §0): the ID is asserted only when the
-        whole-clip decode and the windowed decodes agree on one valid
-        codeword. Measured behaviour: mid-file excerpts flip 3-4 message
-        bits at detection prob ~1.0 and their windows DISAGREE with each
-        other, so this gate refuses (returns None) instead of asserting a
-        miscorrected ID — presence stays trustworthy either way."""
+        """DEPRECATED (measured 2026-08-20, live): windowed agreement does
+        not discriminate. Mid-file windows misdecode even on FULL marked
+        files (so this gate refused every real-length file), while an
+        excerpt's miscorrection is deterministic — its windows agree with
+        each other on the same WRONG codeword. The working discriminator
+        is cross-evidence: a content-fingerprint match to a stored output
+        whose recorded ID confirms or contradicts the decoded payload
+        (docs/watermarking-v2.md §0, second amendment revised). Kept only
+        so pinned consumers keep importing."""
         import numpy as np  # noqa: PLC0415
 
         whole_prob, whole_id, _ = Watermarker.detect_array(audio, sample_rate)
