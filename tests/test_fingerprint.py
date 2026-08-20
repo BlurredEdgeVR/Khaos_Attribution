@@ -69,3 +69,36 @@ def test_survives_mp3(tmp_path):
     b, sr = sf.read(str(back), dtype="float32", always_2d=True)
     votes = match_votes(fingerprint_array(b, sr), fingerprint_array(a, 44100))
     assert is_confident(votes, len(fingerprint_array(b, sr)))
+
+
+def test_repetitive_audio_limitation_is_known_and_dominance_separates():
+    """DOCUMENTED LIMITATION: same-tempo click tracks are near-identical
+    to the whole landmark-algorithm class (the constellation is the
+    transient's, and the tempo locks the offsets) — pairwise confidence
+    alone cannot separate them. What DOES separate the true source is
+    DOMINANCE: the true candidate out-votes the impostor decisively, so
+    the Platform's closed-set matcher requires best >= 2x runner-up.
+    This test pins those facts so the limitation stays visible."""
+    sr = 44100
+    t = np.arange(int(10 * sr)) / sr
+
+    def click_loop(freq, period):
+        audio = np.zeros_like(t)
+        for k in range(int(10 / period)):
+            mask = (t >= k * period) & (t < k * period + 0.05)
+            audio[mask] += np.sin(2 * np.pi * freq * t[mask])
+        return (0.5 * audio).astype("float32")
+
+    from khaos_attribution.fingerprint import match_stats
+    a = fingerprint_array(click_loop(440.0, 0.5), sr)
+    true_votes, _ = match_stats(a, fingerprint_array(click_loop(440.0, 0.5), sr))
+    cross_votes, cross_distinct = match_stats(
+        a, fingerprint_array(click_loop(661.0, 0.5), sr))
+    # the limitation: the cross-match IS pairwise-confident...
+    assert is_confident(cross_votes, len(a), distinct=cross_distinct)
+    # ...but the true source dominates it by well over 2x
+    assert true_votes >= 2 * cross_votes, (true_votes, cross_votes)
+    # different-tempo loops do not even get that far
+    other_votes, other_distinct = match_stats(
+        a, fingerprint_array(click_loop(440.0, 0.73), sr))
+    assert not is_confident(other_votes, len(a), distinct=other_distinct)

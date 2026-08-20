@@ -13,11 +13,20 @@ Format v1 (stable; the index stores (hash, offset_ms) pairs):
 - spectral peaks: local maxima over a (time, freq) neighbourhood, kept
   above an adaptive floor, densest ~30 per second, 40 Hz–5 kHz.
 - landmarks: each peak pairs with up to 5 later peaks 0.1–1.6 s ahead
-  within ±1.5 kHz; hash packs (f1, f2, dt) quantised to (9, 9, 7) bits
-  → 25-bit integers.
+  within ±1.5 kHz; hash packs (f1, f2, dt) quantised to (10, 10, 5) bits
+  → 25-bit integers. Frequency gets the bits (≈4.8 Hz/step): near-
+  harmonic coincidences between different pitches were the main
+  cross-match source; dt tolerates 48 ms steps because the offset
+  HISTOGRAM, not dt, carries the alignment precision.
 - matching: shared hashes vote on the time offset between query and
   candidate; the winning offset's vote count is the score. A confident
-  match needs >= 12 aligned votes AND >= 5% of the query's landmarks.
+  match needs >= 12 aligned votes, >= 5% of the query's landmarks, AND
+  >= 8 DISTINCT hashes in the winning bucket. KNOWN LIMITATION: two
+  same-tempo percussive loops are near-identical to this whole
+  algorithm class (the constellation is the transient's) and can be
+  pairwise-confident against each other — closed-set callers must also
+  require DOMINANCE (best candidate >= 2x the runner-up), which the
+  true source clears decisively and an impostor does not.
 
 Heavy deps stay lazy (numpy, soundfile) so the schema package remains
 light — the pattern watermark.py set.
@@ -33,9 +42,10 @@ _PEAKS_PER_SEC = 30
 _FAN_OUT = 5
 _PAIR_DT_S = (0.1, 1.6)
 _PAIR_DF_HZ = 1500.0
-_FREQ_BITS, _DT_BITS = 9, 7
+_FREQ_BITS, _DT_BITS = 10, 5
 _MATCH_MIN_VOTES = 12
 _MATCH_MIN_FRACTION = 0.05
+_MATCH_MIN_DISTINCT = 8
 
 
 def _spectral_peaks(audio, sample_rate: int):
@@ -113,23 +123,38 @@ def fingerprint_file(path) -> list:
     return fingerprint_array(audio, sample_rate)
 
 
-def match_votes(query_fps: list, candidate_fps: list) -> int:
-    """Aligned-offset votes between two fingerprint lists (both
-    [(hash, offset_ms)]). Higher = better; see module docstring for the
-    confidence thresholds."""
+def match_stats(query_fps: list, candidate_fps: list) -> tuple:
+    """(votes, distinct_hashes) for the best-aligned offset between two
+    fingerprint lists (both [(hash, offset_ms)])."""
     by_hash: dict = {}
     for landmark, offset in candidate_fps:
         by_hash.setdefault(landmark, []).append(offset)
     votes: dict = {}
+    hashes: dict = {}
     for landmark, q_offset in query_fps:
         for c_offset in by_hash.get(landmark, ()):
             # 100 ms offset buckets absorb codec/trim jitter
             bucket = (c_offset - q_offset) // 100
             votes[bucket] = votes.get(bucket, 0) + 1
-    return max(votes.values()) if votes else 0
+            hashes.setdefault(bucket, set()).add(landmark)
+    if not votes:
+        return 0, 0
+    best = max(votes, key=votes.get)
+    return votes[best], len(hashes[best])
 
 
-def is_confident(votes: int, query_landmarks: int) -> bool:
+def match_votes(query_fps: list, candidate_fps: list) -> int:
+    """Back-compat wrapper: the winning bucket's vote count."""
+    return match_stats(query_fps, candidate_fps)[0]
+
+
+def is_confident(votes: int, query_landmarks: int,
+                 distinct: int | None = None) -> bool:
+    """distinct is the winning bucket's distinct-hash count; pass it
+    whenever available — it is the defense against loop/drone material
+    voting the same hash into alignment."""
+    if distinct is not None and distinct < _MATCH_MIN_DISTINCT:
+        return False
     return (votes >= _MATCH_MIN_VOTES
             and query_landmarks > 0
             and votes / query_landmarks >= _MATCH_MIN_FRACTION)
