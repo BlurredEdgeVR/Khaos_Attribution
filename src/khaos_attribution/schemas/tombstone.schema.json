@@ -55,9 +55,19 @@
     "fingerprints": {
       "type": "array",
       "items": {
-        "type": "integer"
+        "type": "array",
+        "prefixItems": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "integer"
+          }
+        ],
+        "minItems": 2,
+        "maxItems": 2
       },
-      "description": "Landmark hashes of the deleted audio, for wild identification."
+      "description": "Landmark (hash, offset_ms) pairs of the deleted audio, for wild identification (fingerprint format v1)."
     }
   }
 }

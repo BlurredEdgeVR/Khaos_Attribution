@@ -171,7 +171,7 @@ def test_tombstone_validates_and_refuses_garbage():
             "artist_id": "art", "content_sha256": "0" * 64,
             "deleted_at_utc": "2026-08-20T12:00:00Z",
             "watermark_id": 1782, "run_id": "run_x",
-            "fingerprint_version": "v1", "fingerprints": [1, 2, 3]}
+            "fingerprint_version": "v1", "fingerprints": [[1, 0], [2, 150]]}
     validate_tombstone(good)
     import pytest
     with pytest.raises(AttributionValidationError):
