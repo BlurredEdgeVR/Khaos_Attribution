@@ -78,3 +78,51 @@ def test_allocation_respects_partition_and_exhaustion():
 def test_unknown_issuer_is_an_error():
     with pytest.raises(KeyError):
         allocate_watermark_id(set(), issuer="mystery")
+
+
+# ---- watermarking v2: model-level allocation (docs/watermarking-v2.md) ----
+
+from khaos_attribution.watermark import (  # noqa: E402
+    MACHINE_BANDS,
+    allocate_model_watermark_id,
+    legacy_watermark_ids,
+)
+
+
+def test_bands_tile_the_payload_space_exactly():
+    seen = set()
+    for band_range in MACHINE_BANDS.values():
+        assert not (seen & set(band_range)), "bands overlap"
+        seen |= set(band_range)
+    assert seen == set(range(PAYLOAD_SPACE)), "bands must tile 0..2047"
+
+
+def test_model_allocation_stays_in_band_and_avoids_legacy():
+    legacy_payloads = {decode_codeword(c)[0] for c in legacy_watermark_ids()}
+    for band, band_range in MACHINE_BANDS.items():
+        cid = allocate_model_watermark_id(band, set())
+        payload, _, _ = decode_codeword(cid)
+        assert payload in band_range
+        assert payload not in legacy_payloads
+
+    # dense band: the only free non-legacy payload is found deterministically
+    band_range = MACHINE_BANDS["laptop"]
+    free = next(p for p in band_range if p not in legacy_payloads)
+    used = {encode_payload(p) for p in band_range if p != free}
+    assert allocate_model_watermark_id("laptop", used) == encode_payload(free)
+    assert allocate_model_watermark_id("laptop",
+                                       used | {encode_payload(free)}) is None
+
+
+def test_legacy_ids_are_frozen_valid_codewords():
+    legacy = legacy_watermark_ids()
+    assert len(legacy) >= 23
+    for codeword in legacy:
+        decoded = decode_codeword(codeword)
+        assert decoded is not None and decoded[1] == codeword, \
+            f"legacy {codeword} is not a clean codeword"
+
+
+def test_unknown_band_is_an_error():
+    with pytest.raises(ValueError):
+        allocate_model_watermark_id("mystery", set())

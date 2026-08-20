@@ -7,9 +7,12 @@
   "properties": {
     "schema_version": {
       "type": "string",
-      "description": "Version of this model card schema, e.g. '1.0.0'.",
+      "description": "Schema version. 1.1.0 adds the optional watermarking-v2 fields; both versions validate so files can sync between machines mid-migration.",
       "pattern": "^\\d+\\.\\d+\\.\\d+$",
-      "const": "1.0.0"
+      "enum": [
+        "1.0.0",
+        "1.1.0"
+      ]
     },
     "artist_name": {
       "type": "string",
@@ -145,6 +148,12 @@
         "date"
       ],
       "additionalProperties": false
+    },
+    "watermark_id": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 65535,
+      "description": "The run's AudioSeal codeword (watermarking v2): every output of this adapter embeds this ID. Optional on pre-v2 cards; required for new runs by the trainer."
     }
   },
   "required": [
