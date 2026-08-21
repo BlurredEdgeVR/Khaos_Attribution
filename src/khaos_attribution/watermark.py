@@ -302,3 +302,82 @@ class Watermarker:
             return float(probability), None, False
         _, codeword, corrected = decoded
         return float(probability), codeword, corrected
+
+
+# ---------------------------------------------------------------------------
+# Retired model IDs — allocation scans the cards on disk, so removing an
+# artist (Workshop data or a served adapter) would otherwise FREE its
+# codewords for the next run: a new adapter stamped with an ID that kept
+# downloads still carry. Removal retires the IDs into a small record
+# beside the artists directory; allocators read it alongside the cards.
+# Append-only, never pruned — an ID is spent forever.
+# ---------------------------------------------------------------------------
+
+RETIRED_IDS_FILENAME = ".retired_watermark_ids.json"
+
+
+def retired_watermark_ids(home) -> set[int]:
+    """Codewords retired under ``home`` (an artists directory). Missing or
+    unreadable record → empty set (the cards themselves still count)."""
+    import json
+    from pathlib import Path
+
+    path = Path(home) / RETIRED_IDS_FILENAME
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return set()
+    out: set[int] = set()
+    for entry in doc.get("retired", []) if isinstance(doc, dict) else []:
+        try:
+            out.add(int(entry["watermark_id"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out
+
+
+def retire_watermark_ids(home, entries) -> int:
+    """Append ``entries`` (dicts with at least ``watermark_id``; ``artist_id``,
+    ``adapter_version``/``run_id``, ``reason`` welcome) to the record under
+    ``home``, stamping ``retired_at_utc``. Returns how many were new.
+    Atomic write; an existing unreadable record is preserved as
+    ``.corrupt-<timestamp>`` rather than overwritten."""
+    import json
+    import os
+    from datetime import datetime, timezone
+    from pathlib import Path
+
+    home = Path(home)
+    path = home / RETIRED_IDS_FILENAME
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    doc = {"schema_version": "1.0.0", "retired": []}
+    if path.exists():
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict) and isinstance(loaded.get("retired"), list):
+                doc = loaded
+            else:
+                raise ValueError("not a retired-ids record")
+        except (OSError, ValueError):
+            stamp = now.replace(":", "").replace("+0000", "Z")
+            path.replace(path.with_name(f"{path.name}.corrupt-{stamp}"))
+    known = {int(e.get("watermark_id")) for e in doc["retired"]
+             if isinstance(e, dict) and str(e.get("watermark_id", "")).lstrip("-").isdigit()}
+    added = 0
+    for entry in entries:
+        try:
+            wm = int(entry["watermark_id"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if wm in known:
+            continue
+        record = {k: v for k, v in entry.items() if k != "watermark_id"}
+        record.update(watermark_id=wm, retired_at_utc=now)
+        doc["retired"].append(record)
+        known.add(wm)
+        added += 1
+    home.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.tmp-{os.getpid()}")
+    tmp.write_text(json.dumps(doc, indent=2), encoding="utf-8")
+    os.replace(tmp, path)
+    return added
