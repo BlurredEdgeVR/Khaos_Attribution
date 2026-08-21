@@ -361,8 +361,12 @@ def retire_watermark_ids(home, entries) -> int:
         except (OSError, ValueError):
             stamp = now.replace(":", "").replace("+0000", "Z")
             path.replace(path.with_name(f"{path.name}.corrupt-{stamp}"))
-    known = {int(e.get("watermark_id")) for e in doc["retired"]
-             if isinstance(e, dict) and str(e.get("watermark_id", "")).lstrip("-").isdigit()}
+    known: set[int] = set()
+    for e in doc["retired"]:
+        try:
+            known.add(int(float(e["watermark_id"])))
+        except (KeyError, TypeError, ValueError):
+            continue
     added = 0
     for entry in entries:
         try:
