@@ -19,7 +19,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=7"]
+test = ["pytest>=7", "soundfile>=0.12"]  # fingerprint survival tests decode real audio
 
 [tool.setuptools.packages.find]
 where = ["src"]
