@@ -35,6 +35,12 @@ CATALOGUE_METADATA_FILENAME = "catalogue_metadata.json"
 # prompt. 0.5 is the extractor's "coin flip" level.
 MIN_CONFIDENCE = 0.5
 BPM_RANGE = (40, 240)
+# Perceived-tempo band. Beat trackers report octave errors freely (the
+# catalogue this was built on had 41 of 77 tracks under 80 bpm, many of
+# them marked 2/4 — half-tempo readings of 4/4 songs). Conditioning wants
+# the tempo a listener would tap, so tempos are folded into this band
+# before the median: doubled below it, halved above it.
+PERCEIVED_BPM = (70, 160)
 
 
 def track_row(track_id: str, title: str | None, metadata: dict | None,
@@ -83,7 +89,7 @@ def catalogue_defaults(document: dict | None) -> dict:
         weighted: list[float] = []
         for t in tempo_rows:
             weight = max(1, int(round((t.get("duration") or 60.0) / 30.0)))
-            weighted.extend([float(t["bpm"])] * weight)
+            weighted.extend([fold_tempo(float(t["bpm"]))] * weight)
         out["bpm"] = int(round(statistics.median(weighted)))
     key_rows = [t["keyscale"] for t in tracks if t.get("keyscale")
                 and (t.get("key_confidence") is None or t["key_confidence"] >= MIN_CONFIDENCE)]
@@ -95,6 +101,19 @@ def catalogue_defaults(document: dict | None) -> dict:
     out["tracks_used"] = len({t["track_id"] for t in tempo_rows} | {t["track_id"] for t in tracks
                              if t.get("keyscale") and t.get("track_id")})
     return out
+
+
+def fold_tempo(bpm: float) -> float:
+    """``bpm`` folded by octaves into the perceived band (doubled while
+    below it, halved while above it). 60 → 120; 180 → 90; 100 → 100."""
+    lo, hi = PERCEIVED_BPM
+    if bpm <= 0:
+        return bpm
+    while bpm < lo:
+        bpm *= 2
+    while bpm > hi:
+        bpm /= 2
+    return bpm
 
 
 def _number(value):
