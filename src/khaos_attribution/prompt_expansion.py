@@ -91,7 +91,8 @@ def _tokens(text: str) -> set[str]:
         w = w.strip("'")
         if len(w) < 3 or w in _STOPWORDS:
             continue
-        # Crude stem so "driving" meets "drive" and "drums" meets "drum".
+        # Crude suffix strip so "drums" meets "drum" and "driving" meets
+        # "drives" (both → "driv"); it is a tie-breaker, not a stemmer.
         for suffix in ("ing", "ed", "es", "s"):
             if len(w) > len(suffix) + 3 and w.endswith(suffix):
                 w = w[: -len(suffix)]
@@ -126,7 +127,11 @@ def rank_exemplars(request: str, exemplars: list[dict],
     ``"embedding"`` when every exemplar carries a vector and the request's
     vector is given, else ``"lexical"``. Stable: ties keep file order."""
     vec = list(request_vector) if request_vector is not None else None
-    if vec and exemplars and all(e.get("vector") for e in exemplars):
+    if vec and exemplars and all(e.get("vector") for e in exemplars) \
+            and all(len(e["vector"]) == len(vec) for e in exemplars):
+        # A dimension mismatch (file embedded by one model, request by
+        # another) would score every exemplar 0 and quietly return file
+        # order under the "embedding" label — so it ranks lexically instead.
         scores = [_cosine(vec, e["vector"]) for e in exemplars]
         method = "embedding"
     else:
@@ -337,9 +342,11 @@ class TextEmbedder:
 
     def __init__(self, model_dir, device: str | None = None):
         from pathlib import Path  # noqa: PLC0415
+        import threading  # noqa: PLC0415
         self.model_dir = Path(model_dir)
         self.device = device
         self._pair = None
+        self._load_lock = threading.Lock()
 
     def available(self) -> bool:
         if not (self.model_dir / "config.json").exists():
@@ -352,18 +359,19 @@ class TextEmbedder:
         return True
 
     def _load(self):
-        if self._pair is None:
-            import torch  # noqa: PLC0415
-            from transformers import AutoModel, AutoTokenizer  # noqa: PLC0415
-            device = self.device
-            if device is None:
-                device = ("cuda" if torch.cuda.is_available()
-                          else "mps" if getattr(torch.backends, "mps", None)
-                          and torch.backends.mps.is_available() else "cpu")
-            tokenizer = AutoTokenizer.from_pretrained(str(self.model_dir))
-            model = AutoModel.from_pretrained(str(self.model_dir)).to(device).eval()
-            self._pair = (model, tokenizer)
-        return self._pair
+        with self._load_lock:  # two first calls must not both load 1.2 GB
+            if self._pair is None:
+                import torch  # noqa: PLC0415
+                from transformers import AutoModel, AutoTokenizer  # noqa: PLC0415
+                device = self.device
+                if device is None:
+                    device = ("cuda" if torch.cuda.is_available()
+                              else "mps" if getattr(torch.backends, "mps", None)
+                              and torch.backends.mps.is_available() else "cpu")
+                tokenizer = AutoTokenizer.from_pretrained(str(self.model_dir))
+                model = AutoModel.from_pretrained(str(self.model_dir)).to(device).eval()
+                self._pair = (model, tokenizer)
+            return self._pair
 
     def embed(self, texts: list[str]):
         model, tokenizer = self._load()
