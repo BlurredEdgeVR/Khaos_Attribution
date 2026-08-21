@@ -126,3 +126,25 @@ def test_legacy_ids_are_frozen_valid_codewords():
 def test_unknown_band_is_an_error():
     with pytest.raises(ValueError):
         allocate_model_watermark_id("mystery", set())
+
+
+def test_retired_ids_are_spent_forever(tmp_path):
+    from khaos_attribution.watermark import (RETIRED_IDS_FILENAME, retire_watermark_ids,
+                                             retired_watermark_ids)
+    home = tmp_path / "artists"
+    assert retired_watermark_ids(home) == set()
+    n = retire_watermark_ids(home, [{"watermark_id": 1300, "artist_id": "a", "run_id": "run_1"},
+                                    {"watermark_id": "1301", "artist_id": "a"},
+                                    {"watermark_id": 1300, "artist_id": "dup"}, {"no": "id"}])
+    assert n == 2 and retired_watermark_ids(home) == {1300, 1301}
+    import json
+    doc = json.loads((home / RETIRED_IDS_FILENAME).read_text())
+    assert doc["retired"][0]["run_id"] == "run_1" and doc["retired"][0]["retired_at_utc"]
+    # append-only; a second retirement keeps the first
+    assert retire_watermark_ids(home, [{"watermark_id": 1302}]) == 1
+    assert retired_watermark_ids(home) == {1300, 1301, 1302}
+    # a corrupt record is set aside, never overwritten in place
+    (home / RETIRED_IDS_FILENAME).write_text("{not json")
+    assert retire_watermark_ids(home, [{"watermark_id": 1303}]) == 1
+    assert retired_watermark_ids(home) == {1303}
+    assert list(home.glob(f"{RETIRED_IDS_FILENAME}.corrupt-*"))
