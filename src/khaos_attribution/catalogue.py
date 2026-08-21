@@ -13,7 +13,7 @@ Document (``catalogue_metadata.json``)::
 
     {"schema_version": "1.0.0", "artist_id": "…",
      "tracks": [{"track_id", "title", "duration", "bpm", "bpm_confidence",
-                 "keyscale", "key_confidence", "timesignature"}]}
+                 "octave_resolved", "keyscale", "key_confidence", "timesignature"}]}
 
 ``keyscale`` is in the apps' picker form (``"A minor"``, sharps only);
 ``timesignature`` is beats per bar as a string (``"4"``).
@@ -61,6 +61,9 @@ def track_row(track_id: str, title: str | None, metadata: dict | None,
         "duration": float(duration) if duration is not None else None,
         "bpm": _number(tempo.get("bpm")),
         "bpm_confidence": _number(tempo.get("confidence")),
+        # The metadata stage (0.2.0+) records whether it resolved an octave
+        # disagreement against the downbeat grid; such a tempo is final.
+        "octave_resolved": tempo.get("octave_resolved") is True,
         "keyscale": keyscale,
         "key_confidence": _number(key.get("confidence")),
         "timesignature": normalise_timesignature(ts.get("numerator")),
@@ -92,7 +95,10 @@ def catalogue_defaults(document: dict | None) -> dict:
         weighted: list[float] = []
         for t in tempo_rows:
             weight = max(1, int(round((t["duration"] or 60.0) / 30.0)))
-            weighted.extend([fold_tempo(t["bpm"])] * weight)
+            # A tempo the extractor already resolved against the downbeat
+            # grid is trusted as read; only unresolved readings are folded.
+            bpm = t["bpm"] if t["octave_resolved"] else fold_tempo(t["bpm"])
+            weighted.extend([bpm] * weight)
         out["bpm"] = int(round(statistics.median(weighted)))
     key_rows = [t["keyscale"] for t in tracks if t["keyscale"]
                 and t["key_confidence"] is not None and t["key_confidence"] >= MIN_CONFIDENCE]
@@ -102,7 +108,9 @@ def catalogue_defaults(document: dict | None) -> dict:
     if ts_rows:
         out["timesignature"] = Counter(ts_rows).most_common(1)[0][0]
     out["tracks_used"] = len({t["track_id"] for t in tempo_rows}
-                             | {t["track_id"] for t in tracks if t["keyscale"]})
+                             | {t["track_id"] for t in tracks if t["keyscale"]
+                                and t["key_confidence"] is not None
+                                and t["key_confidence"] >= MIN_CONFIDENCE})
     return out
 
 
@@ -117,6 +125,7 @@ def _clean_row(t: dict) -> dict:
         "keyscale": normalise_keyscale(t.get("keyscale")),
         "key_confidence": _number(t.get("key_confidence")),
         "timesignature": normalise_timesignature(t.get("timesignature")),
+        "octave_resolved": t.get("octave_resolved") is True,
     }
 
 
