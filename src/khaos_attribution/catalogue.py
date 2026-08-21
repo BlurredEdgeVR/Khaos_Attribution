@@ -30,9 +30,9 @@ from khaos_attribution.prompt_expansion import normalise_keyscale, normalise_tim
 CATALOGUE_METADATA_VERSION = "1.0.0"
 CATALOGUE_METADATA_FILENAME = "catalogue_metadata.json"
 
-# Tracks whose tempo or key the extractor was unsure about are left out of
-# the defaults: a wrong octave or a guessed key would steer every blank
-# prompt. 0.5 is the extractor's "coin flip" level.
+# Tracks whose tempo or key the extractor was unsure about — or never
+# rated — are left out of the defaults: a wrong octave or a guessed key
+# would steer every blank prompt. 0.5 is the extractor's "coin flip" level.
 MIN_CONFIDENCE = 0.5
 BPM_RANGE = (40, 240)
 # Perceived-tempo band. Beat trackers report octave errors freely (the
@@ -77,37 +77,55 @@ def catalogue_defaults(document: dict | None) -> dict:
     the catalogue gives no confident answer. Tempo is the duration-weighted
     median (a long track counts for more of what the adapter heard); key
     and time signature are the most common confident values."""
-    tracks = (document or {}).get("tracks") or []
     out = {"bpm": None, "keyscale": None, "timesignature": None, "tracks_used": 0}
+    raw = (document or {}).get("tracks") if isinstance(document, dict) else None
+    # A hand-edited or torn file must degrade to "no defaults", never
+    # break the server that reads it: rows are coerced, not trusted.
+    tracks = [_clean_row(t) for t in (raw or []) if isinstance(t, dict) and t.get("track_id")]
     if not tracks:
         return out
     lo, hi = BPM_RANGE
     tempo_rows = [t for t in tracks
-                  if isinstance(t.get("bpm"), (int, float)) and lo <= t["bpm"] <= hi
-                  and (t.get("bpm_confidence") is None or t["bpm_confidence"] >= MIN_CONFIDENCE)]
+                  if t["bpm"] is not None and lo <= t["bpm"] <= hi
+                  and t["bpm_confidence"] is not None and t["bpm_confidence"] >= MIN_CONFIDENCE]
     if tempo_rows:
         weighted: list[float] = []
         for t in tempo_rows:
-            weight = max(1, int(round((t.get("duration") or 60.0) / 30.0)))
-            weighted.extend([fold_tempo(float(t["bpm"]))] * weight)
+            weight = max(1, int(round((t["duration"] or 60.0) / 30.0)))
+            weighted.extend([fold_tempo(t["bpm"])] * weight)
         out["bpm"] = int(round(statistics.median(weighted)))
-    key_rows = [t["keyscale"] for t in tracks if t.get("keyscale")
-                and (t.get("key_confidence") is None or t["key_confidence"] >= MIN_CONFIDENCE)]
+    key_rows = [t["keyscale"] for t in tracks if t["keyscale"]
+                and t["key_confidence"] is not None and t["key_confidence"] >= MIN_CONFIDENCE]
     if key_rows:
         out["keyscale"] = Counter(key_rows).most_common(1)[0][0]
-    ts_rows = [t["timesignature"] for t in tracks if t.get("timesignature")]
+    ts_rows = [t["timesignature"] for t in tracks if t["timesignature"]]
     if ts_rows:
         out["timesignature"] = Counter(ts_rows).most_common(1)[0][0]
-    out["tracks_used"] = len({t["track_id"] for t in tempo_rows} | {t["track_id"] for t in tracks
-                             if t.get("keyscale") and t.get("track_id")})
+    out["tracks_used"] = len({t["track_id"] for t in tempo_rows}
+                             | {t["track_id"] for t in tracks if t["keyscale"]})
     return out
+
+
+def _clean_row(t: dict) -> dict:
+    """A row with every field in the type the maths expects (strings and
+    junk become None; the key and time signature re-normalised)."""
+    return {
+        "track_id": str(t.get("track_id")),
+        "duration": _number(t.get("duration")),
+        "bpm": _number(t.get("bpm")),
+        "bpm_confidence": _number(t.get("bpm_confidence")),
+        "keyscale": normalise_keyscale(t.get("keyscale")),
+        "key_confidence": _number(t.get("key_confidence")),
+        "timesignature": normalise_timesignature(t.get("timesignature")),
+    }
 
 
 def fold_tempo(bpm: float) -> float:
     """``bpm`` folded by octaves into the perceived band (doubled while
     below it, halved while above it). 60 → 120; 180 → 90; 100 → 100."""
+    import math  # noqa: PLC0415
     lo, hi = PERCEIVED_BPM
-    if bpm <= 0:
+    if not math.isfinite(bpm) or bpm <= 0:
         return bpm
     while bpm < lo:
         bpm *= 2

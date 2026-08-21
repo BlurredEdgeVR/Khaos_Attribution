@@ -254,7 +254,7 @@ def normalise_keyscale(value) -> str | None:
     note = m.group(1).upper()
     accidental = m.group(2)
     if accidental in ("#", "♯"):
-        note += "#"
+        note = {"E#": "F", "B#": "C"}.get(note + "#", note + "#")  # the pickers list no E#/B#
     elif accidental in ("b", "♭"):
         note = _FLAT_TO_SHARP.get(note + "B", note + "b")
     mode = (m.group(3) or "major").lower()

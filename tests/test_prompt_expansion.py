@@ -112,7 +112,8 @@ def test_trigger_is_added_once_and_respects_track_triggers():
 
 @pytest.mark.parametrize("raw, expected", [
     ("A minor", "A minor"), ("a min", "A minor"), ("F#m", "F# minor"), ("Bb Major", "A# major"),
-    ("C", "C major"), ("Db", "C# major"), ("E♭ minor", "D# minor"), ("H major", None), ("", None), (7, None),
+    ("C", "C major"), ("Db", "C# major"), ("E♭ minor", "D# minor"), ("E# minor", "F minor"),
+    ("B# major", "C major"), ("H major", None), ("", None), (7, None),
 ])
 def test_keyscale_normalisation(raw, expected):
     assert normalise_keyscale(raw) == expected
