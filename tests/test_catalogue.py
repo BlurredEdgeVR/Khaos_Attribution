@@ -25,6 +25,9 @@ def test_row_normalises_to_the_pickers_forms():
     assert row["bpm"] == 122.3 and row["duration"] == 200.0
     empty = track_row("t2", None, {})
     assert empty["bpm"] is None and empty["keyscale"] is None and empty["timesignature"] is None
+    odd = track_row("t3", None, {"tempo": "not a dict", "key": ["A"], "time_signature": 4})
+    assert odd["track_id"] == "t3" and odd["bpm"] is None and odd["keyscale"] is None
+    assert track_row("t4", None, "junk")["bpm"] is None
     assert build_document("a", [row, {"no": "id"}])["tracks"] == [row]
     assert build_document("a", [])["schema_version"] == CATALOGUE_METADATA_VERSION
 
