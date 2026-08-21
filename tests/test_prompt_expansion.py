@@ -54,6 +54,10 @@ def test_embedding_ranking_when_vectors_exist():
     ]})
     order, method = rank_exemplars("anything", ex, request_vector=[0.1, 0.9])
     assert method == "embedding" and order == [1, 0]
+    # a request vector of another dimension (another model) → lexical, never
+    # file order wearing the "embedding" label
+    _, method = rank_exemplars("anything", ex, request_vector=[0.1, 0.9, 0.0])
+    assert method == "lexical"
     # one exemplar without a vector → the whole ranking falls back
     ex[0]["vector"] = None
     _, method = rank_exemplars("anything", ex, request_vector=[0.1, 0.9])
