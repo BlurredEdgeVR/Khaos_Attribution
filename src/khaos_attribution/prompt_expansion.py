@@ -145,9 +145,13 @@ def select_exemplars(request: str, exemplars: list[dict], attempt: int = 0,
     order, method = rank_exemplars(request, exemplars, request_vector)
     if not order:
         return [], method
-    count = max(1, min(count, len(order)))
-    start = (max(0, attempt) * count) % len(order)
-    chosen = [order[(start + i) % len(order)] for i in range(count)]
+    n = len(order)
+    count = max(1, min(count, n))
+    # Enough exemplars: each attempt is the next window. Fewer than a
+    # window: every attempt sees them all, so rotate which one LEADS — the
+    # first example anchors the LM's voice most.
+    start = (max(0, attempt) * count) % n if n > count else max(0, attempt) % n
+    chosen = [order[(start + i) % n] for i in range(count)]
     return chosen, method
 
 

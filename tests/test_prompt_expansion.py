@@ -71,7 +71,11 @@ def test_select_rotates_per_attempt_and_wraps():
     third, _ = select_exemplars("rain", ex, attempt=2)
     assert len(third) == FEW_SHOT_COUNT
     assert select_exemplars("x", [], attempt=3) == ([], "lexical")
-    assert select_exemplars("x", ex[:2], attempt=5)[0] == [0, 1] or len(select_exemplars("x", ex[:2])[0]) == 2
+    # fewer exemplars than a window: every attempt sees them all, the lead rotates
+    two = ex[:2]
+    assert select_exemplars("x", two, attempt=0)[0] == [0, 1]
+    assert select_exemplars("x", two, attempt=1)[0] == [1, 0]
+    assert select_exemplars("x", two, attempt=2)[0] == [0, 1]
 
 
 def test_query_carries_shots_length_and_vocal_stance():
