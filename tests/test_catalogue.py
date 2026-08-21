@@ -21,6 +21,7 @@ def _md(bpm, conf, tonic, mode, kconf=1.0, num=4):
 def test_row_normalises_to_the_pickers_forms():
     row = track_row("t1", "Band - Song", _md(122.3, 0.9, "Ab", "minor", num=4), duration=200)
     assert row["keyscale"] == "G# minor" and row["timesignature"] == "4"
+    assert row["octave_resolved"] is False
     assert row["bpm"] == 122.3 and row["duration"] == 200.0
     empty = track_row("t2", None, {})
     assert empty["bpm"] is None and empty["keyscale"] is None and empty["timesignature"] is None
@@ -77,3 +78,11 @@ def test_a_torn_catalogue_degrades_to_no_defaults_not_an_error():
     assert catalogue_defaults("junk")["bpm"] is None
     assert catalogue_defaults({"tracks": "junk"})["bpm"] is None
     assert fold_tempo(float("inf")) == float("inf") and fold_tempo(float("nan")) != fold_tempo(float("nan"))
+
+
+def test_a_resolved_tempo_is_trusted_as_read():
+    md = _md(168, 0.6, "A", "minor"); md["tempo"]["octave_resolved"] = True
+    rows = [track_row("t1", "a", md, duration=60)]
+    assert catalogue_defaults(build_document("a", rows))["bpm"] == 168   # not folded to 84
+    md2 = _md(168, 0.9, "A", "minor")
+    assert catalogue_defaults(build_document("a", [track_row("t2", "b", md2)]))["bpm"] == 84
