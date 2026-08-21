@@ -61,3 +61,19 @@ def test_tempo_is_folded_into_the_perceived_band():
         track_row("t2", "b", _md(128, 0.9, "A", "minor"), duration=60),
     ]))
     assert d["bpm"] == 129
+
+
+def test_a_torn_catalogue_degrades_to_no_defaults_not_an_error():
+    doc = {"tracks": [
+        "not a row", {"no": "id"},
+        {"track_id": "t1", "duration": "200", "bpm": "120", "bpm_confidence": "0.9",
+         "keyscale": "E# minor", "key_confidence": 1.0, "timesignature": "6/8"},
+        {"track_id": "t2", "bpm": 124, "bpm_confidence": None, "keyscale": "A minor", "key_confidence": None},
+        {"track_id": "t3", "bpm": float("inf"), "bpm_confidence": 0.9},
+    ]}
+    d = catalogue_defaults(doc)
+    assert d["bpm"] == 120 and d["keyscale"] == "F minor" and d["timesignature"] == "6"
+    assert d["tracks_used"] == 1            # t2's unrated tempo/key count for nothing
+    assert catalogue_defaults("junk")["bpm"] is None
+    assert catalogue_defaults({"tracks": "junk"})["bpm"] is None
+    assert fold_tempo(float("inf")) == float("inf") and fold_tempo(float("nan")) != fold_tempo(float("nan"))
