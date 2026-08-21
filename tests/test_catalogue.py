@@ -6,6 +6,7 @@ from khaos_attribution.catalogue import (
     CATALOGUE_METADATA_VERSION,
     build_document,
     catalogue_defaults,
+    fold_tempo,
     title_from_filename,
     track_row,
 )
@@ -35,7 +36,7 @@ def test_defaults_are_confident_and_duration_weighted():
         track_row("t4", "d", _md(200, 0.4, "F#", "major"), duration=60),  # unsure tempo: out
     ]
     d = catalogue_defaults(build_document("a", rows))
-    assert d["bpm"] == 60                       # 20 votes at 60 vs 2+2 at 120/124
+    assert d["bpm"] == 120                      # 20 votes at 60 → folded to 120 — vs 2+2 at 120/124
     assert d["keyscale"] == "A minor"           # F# major counted (key confident), A minor wins 2:1:1
     assert d["timesignature"] == "4"
     assert d["tracks_used"] == 4
@@ -50,3 +51,13 @@ def test_defaults_are_confident_and_duration_weighted():
 def test_title_from_filename():
     assert title_from_filename("Port Sulphur Band - An Acquired Taste.wav") == "Port Sulphur Band - An Acquired Taste"
     assert title_from_filename("") is None and title_from_filename(None) is None
+
+
+def test_tempo_is_folded_into_the_perceived_band():
+    assert fold_tempo(60) == 120 and fold_tempo(30) == 120 and fold_tempo(180) == 90
+    assert fold_tempo(100) == 100 and fold_tempo(0) == 0
+    d = catalogue_defaults(build_document("a", [
+        track_row("t1", "a", _md(65, 0.9, "A", "minor"), duration=60),   # half-tempo reading → 130
+        track_row("t2", "b", _md(128, 0.9, "A", "minor"), duration=60),
+    ]))
+    assert d["bpm"] == 129
