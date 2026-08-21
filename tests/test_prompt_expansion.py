@@ -18,6 +18,8 @@ from khaos_attribution.prompt_expansion import (
     rank_exemplars,
     select_exemplars,
     strip_timestamps,
+    strip_wrapping_quotes,
+    tidy_caption,
     with_trigger,
 )
 
@@ -138,3 +140,14 @@ def test_harvest_normalises_the_whole_answer():
     # a sung request whose LM answer carried no words gives no draft
     assert harvest({"caption": "x", "lyrics": "  "}, instrumental=False)["lyrics"] is None
     assert harvest(None)["caption"] == ""
+
+
+def test_wrapping_quotes_are_stripped_but_apostrophes_stay():
+    assert strip_wrapping_quotes("'A delicate piece.'") == "A delicate piece."
+    assert strip_wrapping_quotes("\u201cLush pads.\u201d") == "Lush pads."
+    assert strip_wrapping_quotes("'A delicate piece.") == "A delicate piece."
+    assert strip_wrapping_quotes("A delicate piece.'") == "A delicate piece."
+    assert strip_wrapping_quotes("The artist's touch isn't lost.") == "The artist's touch isn't lost."
+    assert strip_wrapping_quotes("'Tis the band's night.") == "'Tis the band's night."   # an inner apostrophe pairs it
+    assert tidy_caption(" 'Soft rain. At 0:30 a beat.' ") == "Soft rain. a beat."
+    assert strip_wrapping_quotes("") == "" and strip_wrapping_quotes("'") == ""   # a lone quote is no caption

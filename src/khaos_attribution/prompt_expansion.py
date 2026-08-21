@@ -218,8 +218,26 @@ def clip_caption(text: str, limit: int = MAX_CAPTION_CHARS) -> str:
     return cut[: dot + 1] if dot > MIN_CAPTION_CHARS else cut.rstrip() + "…"
 
 
+_WRAPPING_QUOTES = "'\"`\u2018\u2019\u201c\u201d"
+
+
+def strip_wrapping_quotes(text: str) -> str:
+    """The LM sometimes returns its caption quoted — 'A delicate…' or
+    "…texture." — and a prompt must not begin with a stray quote mark.
+    Only quotes at the very ends go; apostrophes inside the prose stay."""
+    text = (text or "").strip()
+    while len(text) > 1 and text[0] in _WRAPPING_QUOTES and (text[-1] in _WRAPPING_QUOTES
+                                                             or text.count(text[0]) == 1):
+        text = text[1:].strip()
+        if text and text[-1] in _WRAPPING_QUOTES:
+            text = text[:-1].strip()
+    if text and text[-1] in _WRAPPING_QUOTES and text.count(text[-1]) == 1:
+        text = text[:-1].strip()
+    return text
+
+
 def tidy_caption(text: str) -> str:
-    return clip_caption(strip_timestamps(text or ""))
+    return clip_caption(strip_timestamps(strip_wrapping_quotes(text or "")))
 
 
 def with_trigger(caption: str, trigger: str | None) -> str:
