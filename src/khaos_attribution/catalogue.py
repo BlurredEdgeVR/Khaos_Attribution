@@ -48,10 +48,12 @@ def track_row(track_id: str, title: str | None, metadata: dict | None,
     """One document row from a Workshop ``metadata/<track>.json`` payload
     (tempo/key/time_signature dicts as the metadata stage writes them).
     Missing pieces become None; nothing is guessed."""
-    md = metadata or {}
-    tempo = md.get("tempo") or {}
-    key = md.get("key") or {}
-    ts = md.get("time_signature") or {}
+    md = metadata if isinstance(metadata, dict) else {}
+    # A field that is not the dict the metadata stage writes is treated as
+    # absent — the row still lists the track, with None where nothing is known.
+    tempo = md.get("tempo") if isinstance(md.get("tempo"), dict) else {}
+    key = md.get("key") if isinstance(md.get("key"), dict) else {}
+    ts = md.get("time_signature") if isinstance(md.get("time_signature"), dict) else {}
     keyscale = None
     if key.get("tonic") and key.get("mode"):
         keyscale = normalise_keyscale(f"{key['tonic']} {key['mode']}")
