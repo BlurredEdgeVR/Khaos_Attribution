@@ -26,7 +26,10 @@ Rules that keep the records honest:
   MEASURED length (Workshop: `extend_from`), not the form value — a stale
   requested duration once plotted a parent's tail as the child's new audio.
 - **One side per pass.** A repaint window is one contiguous range, so an
-  extend grows the head or the tail, never both in one generation.
+  extend grows the head or the tail, never both in one generation. (The
+  Platform's rework panel lets a listener ask for both ends at once; it
+  queues two generations — tail first, then the head on the result — so
+  every record still carries one window.)
 - An engine `repaint_end` of `-1`/None means the SOURCE's end — it appends
   nothing. A tail-extend must record and send an explicit end past the
   source's length.
