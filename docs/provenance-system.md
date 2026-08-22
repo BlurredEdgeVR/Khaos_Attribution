@@ -170,3 +170,12 @@ missing/unreadable, fingerprint lag, or the healthy census.
 | /verify | Platform `routers/system.py` + `static/shell.js` |
 | index + worker + tombstones | Platform `provenance_index.py`, `routers/outputs.py` |
 | Engine Room coverage check | `khaos_diag/collectors/shared.py`, `checks.py` |
+
+## Amendment — the 2026-08-22 reset
+
+The "23 legacy IDs … permanently excluded" above was true until
+2026-08-22, when the operator deleted every output ever made and reset the
+ID space (`watermarking-v2.md` §3a). The frozen list is empty now; the
+history of what was freed lives in `watermark_resets.json`, and `/verify`
+answers "freed by the reset" for those IDs instead of the per-output
+answer described here.
