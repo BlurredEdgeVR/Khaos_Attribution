@@ -97,8 +97,20 @@ def test_bands_tile_the_payload_space_exactly():
     assert seen == set(range(PAYLOAD_SPACE)), "bands must tile 0..2047"
 
 
-def test_model_allocation_stays_in_band_and_avoids_legacy():
+def _pin_recorded_frozen_list(monkeypatch):
+    """The frozen list is empty since the reset; pin the recorded one so the
+    exclusion path stays exercised."""
+    import khaos_attribution.watermark as wm
+    two = next(e for e in wm.reset_history() if e["epoch"] == 2)
+    frozen = frozenset(two["sources"]["legacy_frozen"])
+    monkeypatch.setattr(wm, "_LEGACY_IDS", frozen)
+    return frozen
+
+
+def test_model_allocation_stays_in_band_and_avoids_legacy(monkeypatch):
+    _pin_recorded_frozen_list(monkeypatch)
     legacy_payloads = {decode_codeword(c)[0] for c in legacy_watermark_ids()}
+    assert legacy_payloads
     for band, band_range in MACHINE_BANDS.items():
         cid = allocate_model_watermark_id(band, set())
         payload, _, _ = decode_codeword(cid)
@@ -117,13 +129,20 @@ def test_model_allocation_stays_in_band_and_avoids_legacy():
 def test_resets_are_on_record_and_freed_ids_say_so():
     from khaos_attribution.watermark import reset_before, reset_history
     history = reset_history()
-    assert history and history[-1]["epoch"] == 2
-    freed = history[-1]["freed"]
+    two = next(e for e in history if e["epoch"] == 2)
+    freed = two["freed"]
     assert freed and all(decode_codeword(c) is not None for c in freed)
+    assert len(freed) == len(set(freed))
+    assert set(two["sources"]["legacy_frozen"]) <= set(freed)
+    assert set(two["sources"]["loto_calibration_renders"]) <= set(freed)
     assert reset_before(freed[0])["reset_at_utc"].startswith("2026-08-22")
-    for kept in history[-1]["kept_active"]:
+    for kept in two["kept_active"]:
         assert reset_before(int(kept)) is None          # the active runs kept theirs
+        assert int(kept) not in freed
     assert reset_before(5) is None                      # never in play
+    # the history is a copy: a caller cannot corrupt the record
+    history[0]["freed"].clear()
+    assert reset_history()[0]["freed"]
     # the legacy list is history: nothing is excluded from allocation any more
     assert legacy_watermark_ids() == frozenset()
 

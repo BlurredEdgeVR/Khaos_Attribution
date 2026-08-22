@@ -404,14 +404,19 @@ def reset_history() -> list[dict]:
     """Every reset on record (package data), oldest first."""
     global _RESETS
     if _RESETS is None:
+        import copy  # noqa: PLC0415
         import json  # noqa: PLC0415
         from importlib.resources import files  # noqa: PLC0415
         try:
             _RESETS = json.loads(files("khaos_attribution")
                                  .joinpath("watermark_resets.json").read_text())
-        except (OSError, ValueError):
+        except (OSError, ValueError) as exc:
+            # A missing record is the 0.16.0 bug (package data not shipped):
+            # every freed ID would quietly read as "unknown". Say so.
+            log.warning("watermark_resets.json unreadable (%s) — reset history unavailable", exc)
             _RESETS = []
-    return list(_RESETS)
+    import copy  # noqa: PLC0415
+    return copy.deepcopy(_RESETS)
 
 
 def reset_before(codeword: int) -> dict | None:
