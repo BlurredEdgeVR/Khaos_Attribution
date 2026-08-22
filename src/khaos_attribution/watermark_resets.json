@@ -2,7 +2,7 @@
   {
     "epoch": 2,
     "reset_at_utc": "2026-08-22T12:13:00+00:00",
-    "reason": "Every output, audition and probe render made before this date was deleted permanently by the operator (nothing exported survives); the per-output era's ledger, the frozen legacy list and the retired records were cleared. Only the three active runs kept their IDs.",
+    "reason": "Every output, audition and probe render made before this date was deleted permanently by the operator (nothing exported survives); the per-output era's ledger, the frozen legacy list and the retired records were cleared. Only the three active runs kept their IDs. Amended the same day: twelve LOTO-calibration renders (data/loto_calibration, 2026-08-18) had survived the deletion and carried IDs that were never on any list; they were deleted and their IDs added here.",
     "kept_active": {
       "60376": "psb_moss/loras/run_20260821_225325_645313/model_card.json",
       "58408": "attribution_test/loras/run_20260821_120409_093909/model_card.json",
@@ -10,6 +10,8 @@
     },
     "freed": [
       1782,
+      7661,
+      7918,
       8520,
       8685,
       9342,
@@ -22,15 +24,24 @@
       19748,
       19931,
       19988,
+      21257,
       21964,
       26277,
+      30509,
+      31620,
+      32027,
       34680,
       34770,
       34996,
       36237,
+      40111,
       41977,
       42495,
       45611,
+      53636,
+      53981,
+      56141,
+      57016,
       59262,
       59518,
       61108,
@@ -92,6 +103,20 @@
         59262,
         59518,
         61108
+      ],
+      "loto_calibration_renders": [
+        7661,
+        7918,
+        21257,
+        30509,
+        31620,
+        32027,
+        40111,
+        45611,
+        53636,
+        53981,
+        56141,
+        57016
       ]
     }
   }
