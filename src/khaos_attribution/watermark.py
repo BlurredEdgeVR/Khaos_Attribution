@@ -385,3 +385,45 @@ def retire_watermark_ids(home, entries) -> int:
     tmp.write_text(json.dumps(doc, indent=2), encoding="utf-8")
     os.replace(tmp, path)
     return added
+
+
+# ---------------------------------------------------------------------------
+# Resets — the history of "never free an ID", when it was deliberately broken.
+# An ID is spent forever while anything carrying it might exist. On
+# 2026-08-22 the operator deleted every output ever made (nothing exported
+# survived) and freed the residue: the per-output ledger, the frozen legacy
+# list and the retired records. The record below keeps that history so a
+# verification of a freed codeword can say "issued before the reset of …"
+# instead of silently pointing at whatever it is re-issued to later.
+# ---------------------------------------------------------------------------
+
+_RESETS = None
+
+
+def reset_history() -> list[dict]:
+    """Every reset on record (package data), oldest first."""
+    global _RESETS
+    if _RESETS is None:
+        import json  # noqa: PLC0415
+        from importlib.resources import files  # noqa: PLC0415
+        try:
+            _RESETS = json.loads(files("khaos_attribution")
+                                 .joinpath("watermark_resets.json").read_text())
+        except (OSError, ValueError):
+            _RESETS = []
+    return list(_RESETS)
+
+
+def reset_before(codeword: int) -> dict | None:
+    """The most recent reset that freed ``codeword`` (it was in play before
+    that date and nothing carrying it survived), or None. A codeword kept by
+    an active run across a reset is NOT reported here."""
+    latest = None
+    for entry in reset_history():
+        try:
+            freed = {int(c) for c in entry.get("freed", [])}
+        except (TypeError, ValueError):
+            continue
+        if int(codeword) in freed:
+            latest = entry
+    return latest

@@ -1,0 +1,98 @@
+[
+  {
+    "epoch": 2,
+    "reset_at_utc": "2026-08-22T12:13:00+00:00",
+    "reason": "Every output, audition and probe render made before this date was deleted permanently by the operator (nothing exported survives); the per-output era's ledger, the frozen legacy list and the retired records were cleared. Only the three active runs kept their IDs.",
+    "kept_active": {
+      "60376": "psb_moss/loras/run_20260821_225325_645313/model_card.json",
+      "58408": "attribution_test/loras/run_20260821_120409_093909/model_card.json",
+      "60301": "psb_all_tracks/loras/run_20260806_220058_418246/model_card.json"
+    },
+    "freed": [
+      1782,
+      8520,
+      8685,
+      9342,
+      10267,
+      11051,
+      11240,
+      16770,
+      19234,
+      19335,
+      19748,
+      19931,
+      19988,
+      21964,
+      26277,
+      34680,
+      34770,
+      34996,
+      36237,
+      41977,
+      42495,
+      45611,
+      59262,
+      59518,
+      61108,
+      64515
+    ],
+    "sources": {
+      "legacy_frozen": [
+        1782,
+        8520,
+        8685,
+        10267,
+        11051,
+        11240,
+        16770,
+        19234,
+        19931,
+        19988,
+        21964,
+        26277,
+        34680,
+        34770,
+        34996,
+        36237,
+        41977,
+        42495,
+        45611,
+        59262,
+        59518,
+        61108,
+        64515
+      ],
+      "retired_workshop": [
+        19748,
+        19335
+      ],
+      "retired_platform": [
+        9342,
+        19748,
+        19335
+      ],
+      "platform_ledger": [
+        1782,
+        8520,
+        8685,
+        10267,
+        11051,
+        11240,
+        16770,
+        19234,
+        19931,
+        19988,
+        26277,
+        34680,
+        34770,
+        34996,
+        36237,
+        41977,
+        42495,
+        59262,
+        59518,
+        61108
+      ]
+    }
+  }
+]

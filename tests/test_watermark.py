@@ -114,9 +114,25 @@ def test_model_allocation_stays_in_band_and_avoids_legacy():
                                        used | {encode_payload(free)}) is None
 
 
+def test_resets_are_on_record_and_freed_ids_say_so():
+    from khaos_attribution.watermark import reset_before, reset_history
+    history = reset_history()
+    assert history and history[-1]["epoch"] == 2
+    freed = history[-1]["freed"]
+    assert freed and all(decode_codeword(c) is not None for c in freed)
+    assert reset_before(freed[0])["reset_at_utc"].startswith("2026-08-22")
+    for kept in history[-1]["kept_active"]:
+        assert reset_before(int(kept)) is None          # the active runs kept theirs
+    assert reset_before(5) is None                      # never in play
+    # the legacy list is history: nothing is excluded from allocation any more
+    assert legacy_watermark_ids() == frozenset()
+
+
 def test_legacy_ids_are_frozen_valid_codewords():
+    """Whatever the frozen list holds (empty since the 2026-08-22 reset)
+    must be clean codewords — the allocator subtracts them blindly."""
     legacy = legacy_watermark_ids()
-    assert len(legacy) >= 23
+    assert isinstance(legacy, frozenset)
     for codeword in legacy:
         decoded = decode_codeword(codeword)
         assert decoded is not None and decoded[1] == codeword, \
