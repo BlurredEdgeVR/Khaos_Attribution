@@ -129,6 +129,22 @@ in any stored record. Schema ranges stay 0–65535 with the validity rule
   operator's sync backlog. The Engine Room's coverage view (§4) makes the
   backlog visible instead of silent.
 
+### 3a. The 2026-08-22 reset (amendment)
+
+"No automatic reclamation" held until the operator deleted every output,
+audition and probe render ever made — permanently, nothing exported
+surviving — and asked for a fresh start. With nothing left that could
+carry an ID, the rule's reason was gone for the residue of the per-output
+era: the frozen legacy list (23 payloads), both apps' retired records and
+the Platform's ledger were freed — 26 codewords. The three active runs
+kept their IDs (no re-embedding). The history is kept as package data
+(`watermark_resets.json`: what was freed, from where, why) and
+`reset_before(codeword)` lets `/verify` report a freed ID as "issued
+before the reset of 2026-08-22" rather than silently pointing at whatever
+it is re-issued to. The legacy list stays as an (empty) file so nothing
+changes shape. A reset is an operator decision recorded in the contract,
+never an automatic path.
+
 ## 4. The provenance index (the "database")
 
 A **derived, rebuildable SQLite index — never a source of truth**. The
