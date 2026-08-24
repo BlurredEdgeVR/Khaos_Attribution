@@ -114,8 +114,10 @@ def _check_code_fields(record, record_kind):
 
 def validate_tombstone(record):
     """Validate an output tombstone (watermarking v2 §6) — written at
-    deletion so deleted material stays identifiable in the wild."""
+    deletion so deleted material stays identifiable in the wild.
+    Returns the record, like every other validator here."""
     _validate(record, "tombstone.schema.json", "output tombstone")
+    return record
 
 
 def validate_track_rights(record):

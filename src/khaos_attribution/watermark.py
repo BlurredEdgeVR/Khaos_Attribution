@@ -404,7 +404,6 @@ def reset_history() -> list[dict]:
     """Every reset on record (package data), oldest first."""
     global _RESETS
     if _RESETS is None:
-        import copy  # noqa: PLC0415
         import json  # noqa: PLC0415
         from importlib.resources import files  # noqa: PLC0415
         try:

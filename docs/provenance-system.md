@@ -2,7 +2,7 @@
 
 Current-state reference (2026-08-20). The *decisions and their reasons*
 live in `watermarking-v2.md`; this page describes the running system.
-Contract version: khaos-attribution **0.11.4**.
+Contract version: khaos-attribution **0.17.0** (the live version is pyproject's).
 
 ## In one paragraph
 

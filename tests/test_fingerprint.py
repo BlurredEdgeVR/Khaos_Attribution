@@ -10,10 +10,10 @@ import pytest
 
 sys.path.insert(0, "src")
 
-from khaos_attribution.fingerprint import (  # noqa: E402
+from khaos_attribution.fingerprint import (
+    match_stats,  # noqa: E402
     fingerprint_array,
     is_confident,
-    match_votes,
 )
 
 
@@ -37,8 +37,8 @@ def test_same_audio_matches_and_different_does_not():
     fa = fingerprint_array(a, 44100)
     fb = fingerprint_array(b, 44100)
     assert len(fa) > 50 and len(fb) > 50
-    self_votes = match_votes(fa, fa)
-    cross_votes = match_votes(fa, fb)
+    self_votes = match_stats(fa, fa)[0]
+    cross_votes = match_stats(fa, fb)[0]
     assert is_confident(self_votes, len(fa))
     assert not is_confident(cross_votes, len(fa))
     assert self_votes > cross_votes * 3
@@ -48,7 +48,7 @@ def test_excerpt_matches_with_offset():
     a = _music_like(3, seconds=20.0)
     full = fingerprint_array(a, 44100)
     excerpt = fingerprint_array(a[int(7.3 * 44100):int(13.3 * 44100)], 44100)
-    votes = match_votes(excerpt, full)
+    votes = match_stats(excerpt, full)[0]
     assert is_confident(votes, len(excerpt)), (votes, len(excerpt))
 
 
@@ -67,7 +67,7 @@ def test_survives_mp3(tmp_path):
     except (FileNotFoundError, subprocess.CalledProcessError):
         pytest.skip("ffmpeg unavailable")
     b, sr = sf.read(str(back), dtype="float32", always_2d=True)
-    votes = match_votes(fingerprint_array(b, sr), fingerprint_array(a, 44100))
+    votes = match_stats(fingerprint_array(b, sr), fingerprint_array(a, 44100))[0]
     assert is_confident(votes, len(fingerprint_array(b, sr)))
 
 
