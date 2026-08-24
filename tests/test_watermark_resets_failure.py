@@ -24,8 +24,11 @@ def test_reset_history_survives_unreadable_package_data(monkeypatch, caplog):
 
 
 def test_reset_history_deepcopies(monkeypatch):
-    monkeypatch.setattr(wm, "_RESETS", None)
+    # Seeded, so the test bites whether or not package data ships.
+    monkeypatch.setattr(wm, "_RESETS", [{"date": "2026-08-22", "freed": [1]}])
     first = wm.reset_history()
-    if first:                                 # real package data present
-        first[0]["mutated"] = True
-        assert "mutated" not in wm.reset_history()[0]
+    first[0]["mutated"] = True
+    first[0]["freed"].append(2)
+    again = wm.reset_history()
+    assert "mutated" not in again[0]
+    assert again[0]["freed"] == [1]

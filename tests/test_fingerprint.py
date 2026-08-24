@@ -10,10 +10,10 @@ import pytest
 
 sys.path.insert(0, "src")
 
-from khaos_attribution.fingerprint import (
-    match_stats,  # noqa: E402
+from khaos_attribution.fingerprint import (  # noqa: E402
     fingerprint_array,
     is_confident,
+    match_stats,
 )
 
 
