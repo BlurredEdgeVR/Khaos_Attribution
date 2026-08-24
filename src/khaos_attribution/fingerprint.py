@@ -143,10 +143,6 @@ def match_stats(query_fps: list, candidate_fps: list) -> tuple:
     return votes[best], len(hashes[best])
 
 
-def match_votes(query_fps: list, candidate_fps: list) -> int:
-    """Back-compat wrapper: the winning bucket's vote count."""
-    return match_stats(query_fps, candidate_fps)[0]
-
 
 def is_confident(votes: int, query_landmarks: int,
                  distinct: int | None = None) -> bool:
