@@ -8,7 +8,8 @@ functions that validate records against them using
 [jsonschema](https://python-jsonschema.readthedocs.io/), and the shared
 implementation modules the two apps pin: `watermark` (AudioSeal v2 —
 run-level SECDED codewords, retirement, the recorded reset history),
-`fingerprint`, `blend` (the attribution estimator), `embedding`,
+`fingerprint`, `estimator` and `blend` (the attribution estimate and
+its blend of signals), `embedding`,
 `lyric_align`, `prompt_expansion` (Simple mode's rules and exemplars),
 and `catalogue` (the artist's usual tempo/key/time signature).
 

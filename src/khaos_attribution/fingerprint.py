@@ -143,7 +143,6 @@ def match_stats(query_fps: list, candidate_fps: list) -> tuple:
     return votes[best], len(hashes[best])
 
 
-
 def is_confident(votes: int, query_landmarks: int,
                  distinct: int | None = None) -> bool:
     """distinct is the winning bucket's distinct-hash count; pass it

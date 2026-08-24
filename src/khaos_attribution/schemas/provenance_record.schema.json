@@ -55,7 +55,7 @@
         "integer",
         "null"
       ],
-      "description": "Identifier embedded in the audio watermark. Null until watermarking is implemented.",
+      "description": "Identifier embedded in the audio watermark (AudioSeal v2: the adapter run's ID). Null when the serving machine could not mark the output.",
       "minimum": 0,
       "maximum": 65535,
       "default": null
