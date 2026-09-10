@@ -18,7 +18,11 @@ from datetime import datetime, timezone
 
 import numpy as np
 
+import numpy as _np
+
+from khaos_attribution import aspects as _aspects
 from khaos_attribution import blend
+from khaos_attribution import diagnostics as _diagnostics
 from khaos_attribution.validation import validate_attribution_estimate
 
 BASE_CAVEAT = ("This is an estimate with the stated method, "
@@ -38,7 +42,10 @@ def build_estimate(*, generation_id: str, artist_id: str,
                    embedding_model: str | None,
                    embedding_version: str | None,
                    exposure_basis: str,
-                   extra_caveats: tuple[str, ...] = ()) -> dict:
+                   extra_caveats: tuple[str, ...] = (),
+                   recent_similarity: dict | None = None,
+                   output_metadata: dict | None = None,
+                   track_metadata: dict[str, dict] | None = None) -> dict:
     """The full pipeline after embedding: exposure → similarity → blend →
     ranges → money → validated document.
 
@@ -139,4 +146,44 @@ def build_estimate(*, generation_id: str, artist_id: str,
         "splits": splits,
         "caveats": caveats,
     }
+    # Two blocks live under `method` rather than at the top level: the
+    # document's top level is closed and its schema_version is a const, so
+    # a new key there would invalidate every estimate ever written.
+    # `method` is deliberately open, and both of these ARE statements about
+    # how the method behaved on this catalogue — `reliability` is the
+    # measured version of the `similarity_informative` boolean beside it.
+    document["method"]["reliability"] = _reliability_block(recent_similarity, scores)
+    if output_metadata is not None and track_metadata:
+        document["method"]["aspects"] = _aspects.aspect_shares(
+            output_metadata, {t: m for t, m in track_metadata.items() if t in blended},
+            timbre_scores=scores)
     return validate_attribution_estimate(document)
+
+
+def _reliability_block(recent: dict | None, this_output: dict[str, float]) -> dict:
+    """How far this catalogue's similarity signal carries, across outputs.
+
+    The collapse readings need a MATRIX — one column per generated output —
+    because the failure they exist to catch is invisible in a single column:
+    a signal that returns the same tracks whatever was generated looks
+    perfectly ordinary one output at a time. That is why the estimator's own
+    ``SPREAD_FLOOR``, which reads one column, cannot see it.
+
+    The caller supplies the earlier columns because it alone knows where
+    they are stored. Without them the answer is ``unknown``, and ``unknown``
+    is never dressed up as either verdict.
+    """
+    if not recent:
+        return {"verdict": "unknown",
+                "why": ("no earlier outputs were supplied, so the similarity signal "
+                        "could not be judged across generations"),
+                "method": "aria_collapse_diagnostics"}
+    shared = {t for col in recent.values() for t in col} & set(this_output)
+    tracks = sorted(shared)
+    if not tracks:
+        return {"verdict": "unknown",
+                "why": "the earlier outputs scored no track this estimate also scores",
+                "method": "aria_collapse_diagnostics"}
+    columns = [[col.get(t, 0.0) for t in tracks] for col in recent.values()]
+    columns.append([this_output.get(t, 0.0) for t in tracks])
+    return _diagnostics.reliability(_np.asarray(columns, dtype=float).T)
