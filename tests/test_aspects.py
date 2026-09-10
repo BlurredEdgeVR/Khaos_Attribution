@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from khaos_attribution.aspects import (RELATED_KEY_WEIGHT, aspect_shares,
+from khaos_attribution.aspects import (METRE_WEIGHT, RELATED_KEY_WEIGHT, aspect_shares,
                                        key_agreement, metre_agreement,
                                        rhythm_agreement, tempo_agreement)
 
@@ -64,10 +64,13 @@ def test_metre_and_the_rhythm_blend():
         {"bpm": 120, "time_signature": {"numerator": 4}},
         {"bpm": 120, "time_signature": {"numerator": 3}})
     assert 0.7 < same_tempo_other_metre < 1.0
-    # Either descriptor alone still answers.
+    # Tempo alone still answers in full; METRE alone is capped at its own
+    # weight. 4/4 is near-universal, so an unmeasured tempo beside a shared
+    # metre used to score a perfect 1.0 and outrank a track 3 BPM out.
     assert rhythm_agreement({"bpm": 120}, {"bpm": 120}) == 1.0
     assert rhythm_agreement({"time_signature": {"numerator": 4}},
-                            {"time_signature": {"numerator": 4}}) == 1.0
+                            {"time_signature": {"numerator": 4}}) == METRE_WEIGHT
+    assert rhythm_agreement({"bpm": 118}, {"bpm": 120}) > METRE_WEIGHT
     assert rhythm_agreement({}, {}) is None
 
 
@@ -99,12 +102,42 @@ def test_a_channel_with_nothing_measurable_is_present_and_null():
     assert "harmony" in r and "rhythm" in r and "timbre" in r
 
 
-def test_the_timbre_channel_is_the_estimator_s_own_number_not_a_second_one():
-    """If this recomputed similarity it could drift from the blend."""
-    r = aspect_shares(OUT, {"t1": TRACKS["t1"], "t2": TRACKS["t2"]},
-                      timbre_scores={"t1": 3.0, "t2": 1.0})
-    assert r["timbre"]["shares_pct"] == {"t1": 75.0, "t2": 25.0}
+def test_the_timbre_channel_is_the_blend_s_own_share_when_it_is_given_one():
+    """It used to normalise the raw cosines linearly while the estimate's
+    similarity_share_pct came from the blend's softmax — one document, two
+    numbers for 'the estimator's own CLAP similarity', one of them labelled
+    unchanged. On a real spread that was 74.9/18.6/6.5 against 35.4/33.1/31.4."""
+    tracks = {"t1": TRACKS["t1"], "t2": TRACKS["t2"]}
+    r = aspect_shares(OUT, tracks, timbre_weights={"t1": 0.749, "t2": 0.251})
+    assert r["timbre"]["shares_pct"] == {"t1": 74.9, "t2": 25.1}
     assert "unchanged" in r["timbre"]["source"]
+
+
+def test_without_the_blend_s_share_the_channel_says_it_is_not_the_same_number():
+    r = aspect_shares(OUT, {"t1": TRACKS["t1"], "t2": TRACKS["t2"]},
+                      timbre_scores={"t1": 0.6, "t2": 0.2})
+    assert r["timbre"]["shares_pct"] == {"t1": 75.0, "t2": 25.0}
+    assert "NOT the blend" in r["timbre"]["source"]
+
+
+def test_a_negative_cosine_can_never_produce_a_negative_or_over_100_share():
+    """CLAP cosines are signed. A signed sum gave 0.9/-0.85/0.1 the shares
+    600% / -566.7% / 66.7%, which summed to 100 and were not shares."""
+    r = aspect_shares(OUT, {"t1": TRACKS["t1"], "t2": TRACKS["t2"], "t3": TRACKS["t3"]},
+                      timbre_scores={"t1": 0.9, "t2": -0.85, "t3": 0.1})
+    shares = r["timbre"]["shares_pct"]
+    assert all(0 <= v <= 100 for v in shares.values()), shares
+    assert sum(shares.values()) == pytest.approx(100, abs=0.01)
+
+
+def test_all_measured_and_all_disagreeing_is_not_the_same_as_nothing_measurable():
+    """Both used to report shares_pct: null. One is a finding."""
+    nothing = aspect_shares({"bpm": None, "key": None}, {"t1": {"bpm": None, "key": None}})
+    assert nothing["harmony"]["unmeasurable"] is True
+    disagree = aspect_shares({"key": _k("C", "major")},
+                             {"t1": {"key": _k("F#", "major")}, "t2": {"key": _k("B", "major")}})
+    assert disagree["harmony"]["unmeasurable"] is False
+    assert disagree["harmony"]["measured_tracks"] == 2 and disagree["harmony"]["shares_pct"] is None
 
 
 def test_the_caveat_refuses_the_causal_reading():

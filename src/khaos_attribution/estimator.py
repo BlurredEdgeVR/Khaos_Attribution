@@ -18,8 +18,6 @@ from datetime import datetime, timezone
 
 import numpy as np
 
-import numpy as _np
-
 from khaos_attribution import aspects as _aspects
 from khaos_attribution import blend
 from khaos_attribution import diagnostics as _diagnostics
@@ -150,13 +148,23 @@ def build_estimate(*, generation_id: str, artist_id: str,
     # document's top level is closed and its schema_version is a const, so
     # a new key there would invalidate every estimate ever written.
     # `method` is deliberately open, and both of these ARE statements about
-    # how the method behaved on this catalogue — `reliability` is the
-    # measured version of the `similarity_informative` boolean beside it.
-    document["method"]["reliability"] = _reliability_block(recent_similarity, scores)
+    # how the method behaved on this catalogue. `reliability` is NOT the
+    # measured version of `similarity_informative` beside it: that boolean
+    # reads the spread WITHIN one output, and this reads variation ACROSS
+    # outputs — the failure the boolean cannot see.
+    reliability = _reliability_block(recent_similarity, scores)
+    document["method"]["reliability"] = reliability
+    if reliability.get("verdict") == "collapsed":
+        # The caveats list is what every surface in both rooms already
+        # renders; a verdict buried in `method` would be invisible.
+        caveats.append(
+            "Across recent outputs this catalogue's similarity signal did not vary with "
+            "the output (" + str(reliability.get("why", "")) + "). Read these shares as "
+            "the exposure prior.")
     if output_metadata is not None and track_metadata:
         document["method"]["aspects"] = _aspects.aspect_shares(
             output_metadata, {t: m for t, m in track_metadata.items() if t in blended},
-            timbre_scores=scores)
+            timbre_scores=scores, timbre_weights=sim_weights)
     return validate_attribution_estimate(document)
 
 
@@ -169,21 +177,34 @@ def _reliability_block(recent: dict | None, this_output: dict[str, float]) -> di
     perfectly ordinary one output at a time. That is why the estimator's own
     ``SPREAD_FLOOR``, which reads one column, cannot see it.
 
-    The caller supplies the earlier columns because it alone knows where
-    they are stored. Without them the answer is ``unknown``, and ``unknown``
-    is never dressed up as either verdict.
+    The caller supplies the earlier columns. TODAY NOTHING STORES THEM: an
+    estimate document records the softmax share, not the raw cosines, and
+    feeding the blended share here is forbidden (it contains the exposure
+    prior, which is constant across outputs and would manufacture the
+    collapse). So every estimate written in either room carries ``unknown``
+    until a per-output similarity column is persisted somewhere. That is a
+    missing producer, not a missing method, and saying so is the point of
+    this paragraph.
     """
     if not recent:
         return {"verdict": "unknown",
                 "why": ("no earlier outputs were supplied, so the similarity signal "
                         "could not be judged across generations"),
                 "method": "aria_collapse_diagnostics"}
-    shared = {t for col in recent.values() for t in col} & set(this_output)
-    tracks = sorted(shared)
+    # INTERSECTION, not union. Filling a track a column does not carry with
+    # a cosine of 0.0 invents data, and the invented zeros manufacture
+    # exactly the variation this is looking for: ten earlier outputs that
+    # scored the catalogue identically but stored different subsets came
+    # back "informative" instead of "collapsed" (found in review, 2026-09-10).
+    covered = set(this_output)
+    for col in recent.values():
+        covered &= set(col)
+    tracks = sorted(covered)
     if not tracks:
         return {"verdict": "unknown",
-                "why": "the earlier outputs scored no track this estimate also scores",
+                "why": ("the earlier outputs do not all score a track this estimate scores, "
+                        "so there is no matrix to read without inventing values"),
                 "method": "aria_collapse_diagnostics"}
-    columns = [[col.get(t, 0.0) for t in tracks] for col in recent.values()]
-    columns.append([this_output.get(t, 0.0) for t in tracks])
-    return _diagnostics.reliability(_np.asarray(columns, dtype=float).T)
+    columns = [[col[t] for t in tracks] for col in recent.values()]
+    columns.append([this_output[t] for t in tracks])
+    return _diagnostics.reliability(np.asarray(columns, dtype=float).T)

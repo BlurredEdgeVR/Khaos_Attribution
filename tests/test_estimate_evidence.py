@@ -59,7 +59,34 @@ def test_earlier_outputs_over_a_different_catalogue_are_unknown_not_blended():
     """Columns from another artist's tracks would be arithmetic over
     unrelated numbers."""
     rel = _estimate(recent_similarity={"g9": {"other": 0.5}})["method"]["reliability"]
-    assert rel["verdict"] == "unknown" and "no track this estimate also scores" in rel["why"]
+    assert rel["verdict"] == "unknown" and "without inventing values" in rel["why"]
+
+
+def test_partial_columns_are_intersected_never_zero_filled():
+    """Zero-filling a track a column does not carry invents a cosine, and
+    the invented zeros manufacture the very variation the readings look for:
+    ten identical rankings stored as different subsets came back
+    'informative' instead of 'collapsed'."""
+    same = {"t1": 0.81, "t2": 0.42, "t3": 0.63}
+    partial = {}
+    for i in range(10):
+        col = dict(same)
+        col.pop("t3" if i % 2 else "t2")      # each column drops a different track
+        partial[f"g{i}"] = col
+    rel = _estimate(recent_similarity=partial)["method"]["reliability"]
+    # t1 is the only track every column carries, so one row is all there is.
+    assert rel["n_tracks"] == 1
+    assert rel["verdict"] == "collapsed"
+
+
+def test_a_collapsed_verdict_reaches_the_caveats_not_just_the_method_block():
+    """Every surface in both rooms renders `caveats`; none renders `method`
+    beyond two fields, so a verdict left there would be invisible."""
+    doc = _estimate(recent_similarity={f"g{i}": {"t1": 0.81, "t2": 0.42, "t3": 0.63}
+                                       for i in range(10)})
+    assert doc["method"]["reliability"]["verdict"] == "collapsed"
+    assert any("did not vary with the output" in c for c in doc["caveats"])
+    assert any("exposure prior" in c for c in doc["caveats"])
 
 
 def test_the_aspects_block_appears_only_when_the_caller_supplies_descriptors():

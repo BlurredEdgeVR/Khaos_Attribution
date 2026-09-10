@@ -48,7 +48,10 @@ import math
 
 import numpy as np
 
-ESTIMATOR_VERSION = "0.3.0"
+ESTIMATOR_VERSION = "0.4.0"   # 0.4.0: the method block gained reliability
+# and (when the caller supplies descriptors) aspects. The version moves
+# because the DOCUMENT moved: two estimates both stamped 0.3.0 could
+# otherwise differ in whether they carry a reliability verdict.
 # exposure_basis moved to a per-document string naming the data source
 # ("live Workshop store" / "bundled at artist import") — see estimator.py.
 TOP_K = 3            # segments per track that speak for it
