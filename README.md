@@ -9,7 +9,10 @@ functions that validate records against them using
 implementation modules the two apps pin: `watermark` (AudioSeal v2 —
 run-level SECDED codewords, retirement, the recorded reset history),
 `fingerprint`, `estimator` and `blend` (the attribution estimate and
-its blend of signals), `embedding`,
+its blend of signals), `diagnostics` (whether that estimate's similarity
+signal varied with the output at all, or returns the same tracks whatever
+was generated) and `aspects` (per-aspect shares — harmony, rhythm, timbre —
+which are descriptor agreement, never causal influence), `embedding`,
 `lyric_align`, `prompt_expansion` (Simple mode's rules and exemplars),
 and `catalogue` (the artist's usual tempo/key/time signature).
 
@@ -78,7 +81,11 @@ on, and what it extends.
 | `base_model` | The name and version of the base model the adapter was trained against. |
 | `base_model_licence` | The licence the base model is distributed under. |
 
-Both schemas reject unknown fields, so typos in field names fail validation
+The model card and provenance record reject unknown fields; the attribution
+estimate's `method` block deliberately does NOT (`additionalProperties: true`),
+which is where `reliability` and `aspects` ride — the document's top level is
+closed and its `schema_version` is a const, so a key there would invalidate
+every estimate ever written. Both schemas otherwise reject unknown fields, so typos in field names fail validation
 rather than passing silently.
 
 ## Running the tests

@@ -47,7 +47,15 @@ import numpy as np
 # word as well as a number, and the word is deliberately cautious.
 KAPPA_COLLAPSED = 0.90        # columns this alike are one ranking wearing many hats
 RANK1_COLLAPSED = 0.95        # one axis holding this much is the whole matrix
+DIAGNOSTICS_VERSION = "0.2.0"  # 0.1.0 had no absolute spread floor
 MIN_QUERIES = 8               # fewer columns than this and the readings are noise
+# Every reading above is a RATIO and so cannot see magnitude: a matrix of
+# 0.42 plus noise of 1e-9 produced kappa 0.13 and a verdict of informative,
+# which is the exact failure this module exists to catch (found in review,
+# 2026-09-10). This is the estimator's own noise floor, named here so the two
+# guards cannot drift; blend.SPREAD_FLOOR is the owner.
+from khaos_attribution.blend import SPREAD_FLOOR as _SPREAD_FLOOR  # noqa: E402
+SPREAD_FLOOR = _SPREAD_FLOOR
 
 
 def _column_correlations(scores: np.ndarray) -> float | None:
@@ -108,9 +116,15 @@ def collapse_readings(scores: np.ndarray) -> dict:
     live = totals > 0
     concentration = float((positive.max(axis=0)[live] / totals[live]).mean()) if live.any() else None
 
+    # The absolute spread the ratios cannot see: the median per-column
+    # standard deviation, in the estimator's own cosine units.
+    spread = float(np.median(s.std(axis=0)))
+
     return {
         "n_tracks": int(n_tracks),
         "n_queries": int(n_queries),
+        "median_column_spread": spread,
+        "spread_floor": float(SPREAD_FLOOR),
         "constant_columns": constant,
         "kappa": kappa,
         "rank1_energy": rank1,
@@ -137,17 +151,31 @@ def verdict(readings: dict) -> dict:
 
     reasons = []
     kappa, rank1 = readings.get("kappa"), readings.get("rank1_energy")
+    spread = readings.get("median_column_spread")
+    floor = readings.get("spread_floor", SPREAD_FLOOR)
+    if spread is not None and spread < floor:
+        # Below the estimator's own noise floor nothing else is worth
+        # reading: the ratios will happily describe the shape of noise.
+        return {"verdict": "collapsed",
+                "why": (f"the similarity scores vary by {spread:.2g} across tracks, below the "
+                        f"estimator's noise floor of {floor:.2g} — there is no signal to read")}
     if readings.get("constant_columns"):
         reasons.append(f"{readings['constant_columns']} of {n} outputs scored every track identically")
+    live = n - (readings.get("constant_columns") or 0)
     if kappa is not None and kappa >= KAPPA_COLLAPSED:
-        reasons.append(f"outputs rank the catalogue almost identically (kappa {kappa:.2f})")
+        reasons.append(f"outputs rank the catalogue almost identically "
+                       f"(kappa {kappa:.2f} over {live} varying outputs)")
     if rank1 is not None and rank1 >= RANK1_COLLAPSED:
         reasons.append(f"one axis holds {rank1:.0%} of the signal")
     if reasons:
         return {"verdict": "collapsed", "why": "; ".join(reasons)}
+    bits = [f"the similarity signal varies across {n} outputs"]
+    if kappa is not None:
+        bits.append(f"kappa {kappa:.2f}")
+    if rank1 is not None:
+        bits.append(f"leading axis {rank1:.0%}")
     return {"verdict": "informative",
-            "why": f"the similarity signal varies across {n} outputs "
-                   f"(kappa {kappa:.2f}" + (f", leading axis {rank1:.0%}" if rank1 is not None else "") + ")"}
+            "why": bits[0] + (" (" + ", ".join(bits[1:]) + ")" if len(bits) > 1 else "")}
 
 
 def reliability(scores: np.ndarray) -> dict:
@@ -159,7 +187,14 @@ def reliability(scores: np.ndarray) -> dict:
     readings = collapse_readings(scores)
     return {
         "method": "aria_collapse_diagnostics",
+        "method_version": DIAGNOSTICS_VERSION,
         "method_source": "arXiv:2605.16181 (Han, Panahi & Tatar, 2026) — equations reimplemented, no code exists",
+        # The bands are not calibrated against any Khaos catalogue, and a
+        # document read by a rights body must carry that, not leave it in a
+        # source comment.
+        "caveat": ("The bands that turn these readings into a word are conventions, not "
+                   "calibrations: nothing has been measured against a Khaos catalogue. "
+                   "A collapsed verdict means the estimate is its exposure prior."),
         **readings,
         **verdict(readings),
     }

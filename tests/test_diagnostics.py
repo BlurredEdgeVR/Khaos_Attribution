@@ -79,13 +79,55 @@ def test_the_verdict_names_its_method_and_that_no_code_exists_to_copy():
     assert "2605.16181" in r["method_source"] and "no code exists" in r["method_source"]
 
 
-def test_mutation_the_kappa_band_is_what_calls_collapse():
-    """Proof the pin bites: with the band moved to 1.1 nothing can reach it,
-    and the collapsed matrix above would be reported as informative."""
+def test_each_band_alone_is_enough_to_call_collapse(monkeypatch):
+    """The bands are what call it, proved by moving them rather than by
+    editing the readings. The first cut's docstring said 'with the band
+    moved to 1.1' and then mutated the readings dict instead, which proves
+    only that verdict() reads a key — and left RANK1_COLLAPSED untested."""
+    import khaos_attribution.diagnostics as d
+
     rng = _rng()
     one_axis = rng.normal(size=(24, 1)) @ np.ones((1, 16)) + 1e-9 * rng.normal(size=(24, 16))
-    readings = collapse_readings(one_axis)
-    readings["rank1_energy"] = 0.10          # remove the other trigger
-    assert verdict(readings)["verdict"] == "collapsed"
-    readings["kappa"] = 0.10                 # and now neither fires
-    assert verdict(readings)["verdict"] == "informative"
+    healthy = collapse_readings(rng.normal(size=(24, 16)) + 0.5)
+    collapsed = collapse_readings(one_axis)
+    collapsed["median_column_spread"] = 1.0      # keep the absolute floor out of it
+    healthy["median_column_spread"] = 1.0
+
+    assert verdict(collapsed)["verdict"] == "collapsed"
+    assert verdict(healthy)["verdict"] == "informative"
+
+    # Kappa alone: put rank1 out of reach, and the kappa band still calls it.
+    monkeypatch.setattr(d, "RANK1_COLLAPSED", 1.1)
+    assert verdict(collapsed)["verdict"] == "collapsed"
+    monkeypatch.setattr(d, "KAPPA_COLLAPSED", 1.1)
+    assert verdict(collapsed)["verdict"] == "informative"
+
+    # Rank1 alone: the same matrix, with only that band reachable.
+    monkeypatch.setattr(d, "RANK1_COLLAPSED", 0.95)
+    assert verdict(collapsed)["verdict"] == "collapsed"
+
+
+def test_the_absolute_floor_catches_what_every_ratio_misses(monkeypatch):
+    """Kappa, the energy ratios and the concentration are all scale-free, so
+    a dead-flat signal plus 1e-9 of noise read 'informative' — the exact
+    failure this module exists to catch."""
+    import khaos_attribution.diagnostics as d
+
+    flat = np.full((40, 12), 0.42) + 1e-9 * _rng().normal(size=(40, 12))
+    r = reliability(flat)
+    assert r["verdict"] == "collapsed" and "noise floor" in r["why"]
+    assert r["median_column_spread"] < r["spread_floor"]
+    # And it is the FLOOR doing it: drop the floor and the ratios are happy.
+    monkeypatch.setattr(d, "SPREAD_FLOOR", 0.0)
+    assert d.verdict(d.collapse_readings(flat))["verdict"] == "informative"
+
+
+def test_the_block_carries_its_version_and_says_the_bands_are_conventions():
+    r = reliability(_rng().normal(size=(24, 16)) + 0.5)
+    assert r["method_version"] == d_version()
+    assert "conventions, not" in r["caveat"] and "exposure prior" in r["caveat"]
+
+
+def d_version():
+    from khaos_attribution.diagnostics import DIAGNOSTICS_VERSION
+    return DIAGNOSTICS_VERSION
