@@ -10,7 +10,6 @@ channel a resemblance ran through.
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 from khaos_attribution.estimator import build_estimate
 
