@@ -10,11 +10,21 @@ their data source would be drift wearing a contract's name.
 The caller supplies data it alone knows how to load (embeddings, rights,
 run metadata, the output's embedding); this function does the rest and
 returns a document that has already passed validate_attribution_estimate.
+
+What the document claims (2026-09-11, the release review): the shares are
+RESEMBLANCE — how closely the output's audio embedding resembles each
+training track, weighted by that track's share of the training data. They
+are not a measurement of what shaped the model, and the document says so
+in its first caveat rather than leaving the reader to infer it from a
+method block. The JSON key `influence` is kept because every document
+written since schema 1.0.0 carries it and the top level is closed; the
+word is a wire name, not a claim.
 """
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Iterable
 
 import numpy as np
 
@@ -23,8 +33,55 @@ from khaos_attribution import blend
 from khaos_attribution import diagnostics as _diagnostics
 from khaos_attribution.validation import validate_attribution_estimate
 
-BASE_CAVEAT = ("This is an estimate with the stated method, "
-               "not a legal statement of ownership.")
+BASE_CAVEAT = (
+    "This is a resemblance estimate, not a measurement of influence: each "
+    "share says how closely the output's audio embedding resembles that "
+    "track's training segments, weighted by the track's share of the "
+    "training data. Published work finds this kind of similarity correlates "
+    "only weakly with a track's actual effect on a model. It is an estimate "
+    "with the stated method, never a legal statement of ownership.")
+
+# How many earlier outputs' similarity columns a producer should hand back.
+# More than this and the matrix is history, not a reading of the adapter as
+# it is used now.
+RECENT_LIMIT = 64
+
+
+def recent_similarity_from_documents(documents: Iterable[dict], *,
+                                     adapter_version: str,
+                                     exclude_generation_id: str | None = None,
+                                     limit: int = RECENT_LIMIT
+                                     ) -> dict[str, dict[str, float]]:
+    """The earlier outputs' similarity columns, read back from the estimate
+    documents that already exist for this adapter.
+
+    Since estimator 0.5.0 every document stores its raw per-track cosines
+    under ``method.similarity_scores`` — the one input the collapse readings
+    need and nothing used to persist, which is why every estimate written
+    before today carried a reliability verdict of ``unknown``. A producer
+    loads whatever ``*.attribution.json`` files it has for the adapter and
+    passes the result of this function as ``recent_similarity``; documents
+    for other adapters, without the block, or for the output being
+    estimated are skipped. The newest ``limit`` columns are kept, by the
+    documents' own ``created_at``.
+    """
+    dated: list[tuple[str, str, dict[str, float]]] = []
+    for doc in documents:
+        if not isinstance(doc, dict) or doc.get("adapter_version") != adapter_version:
+            continue
+        gid = doc.get("generation_id")
+        if not gid or gid == exclude_generation_id:
+            continue
+        column = (doc.get("method") or {}).get("similarity_scores")
+        if not isinstance(column, dict) or not column:
+            continue
+        try:
+            dated.append((str(doc.get("created_at") or ""), gid,
+                          {t: float(v) for t, v in column.items()}))
+        except (TypeError, ValueError):
+            continue
+    dated.sort(key=lambda item: item[0])
+    return {gid: column for _, gid, column in dated[-limit:]}
 
 
 def build_estimate(*, generation_id: str, artist_id: str,
@@ -52,18 +109,29 @@ def build_estimate(*, generation_id: str, artist_id: str,
     reads writers/publishers/title directly; and `exposure_basis` names the
     data source, the ONE field that legitimately differs between apps.
 
-    Raises ValueError when no training track has embeddings, or when the
-    embedding index and array disagree — a torn bundle must fail loudly,
-    not misattribute quietly.
+    Raises ValueError when no training track has embeddings, when the
+    embedding index and array disagree, or when an embedding holds a NaN or
+    infinity — a torn or corrupt bundle must fail loudly with a sentence,
+    not misattribute quietly or die inside the validator with a number.
     """
     if len(row_track_ids) != len(embeddings):
         raise ValueError(
             f"Embedding index lists {len(row_track_ids)} rows but the array "
             f"holds {len(embeddings)} — the store/bundle is torn (files "
             f"copied at different times?). Refusing to estimate from it.")
+    if not np.isfinite(output_embedding).all():
+        raise ValueError(
+            f"The output's embedding for {generation_id} contains NaN or "
+            f"infinity — the audio could not be embedded; nothing to compare.")
+    if len(embeddings) and not np.isfinite(embeddings).all():
+        raise ValueError(
+            f"The stored embeddings for {adapter_version} contain NaN or "
+            f"infinity — re-run the embedding stage before estimating.")
     caveats = [BASE_CAVEAT, *extra_caveats]
 
-    missing = sorted(run_tracks - set(segment_counts))
+    # A track the store lists with zero segments is as absent as one it does
+    # not list at all; both are named here rather than dropped in silence.
+    missing = sorted(t for t in run_tracks if segment_counts.get(t, 0) <= 0)
     if missing:
         caveats.append(
             f"{len(missing)} of {len(run_tracks)} training tracks have no "
@@ -85,11 +153,24 @@ def build_estimate(*, generation_id: str, artist_id: str,
     sim_weights, temperature = blend.similarity_weights(scores)
     if sim_weights is None:
         caveats.append(
-            "Single-track adapter: influence is the whole output by "
-            "construction; similarity adds nothing."
+            "Single-track adapter: the whole output is attributed to its one "
+            "training track by construction — the share is the training "
+            "exposure, and resemblance was not measured."
             if len(run_tracks) == 1 else
             "Acoustic similarity was uninformative (score spread below the "
             "noise floor); blended shares equal the exposure prior.")
+
+    # The reliability of the similarity signal ACROSS outputs is read before
+    # the blend so that a collapsed signal changes the number, not just the
+    # footnote: a signal that returns the same tracks whatever was generated
+    # is not evidence about this output, and the honest share is the prior.
+    reliability = _reliability_block(recent_similarity, scores)
+    if reliability.get("verdict") == "collapsed":
+        sim_weights, temperature = None, None
+        caveats.append(
+            "Across recent outputs this catalogue's similarity signal did not vary with "
+            "the output (" + str(reliability.get("why", "")) + "). Resemblance was "
+            "therefore not used: these shares are the exposure prior.")
 
     blended = blend.blend_shares(exposure, sim_weights)
     if sim_weights is None:
@@ -103,8 +184,8 @@ def build_estimate(*, generation_id: str, artist_id: str,
     without_rights = [t for t in blended if t not in rights]
     if without_rights:
         caveats.append(
-            f"{len(without_rights)} of {len(blended)} influencing tracks "
-            f"have no rights record; their influence is reported as "
+            f"{len(without_rights)} of {len(blended)} tracks in this estimate "
+            f"have no rights record; their share is reported as "
             f"unattributed, not redistributed.")
     splits = blend.money_splits(blended, ranges, rights)
 
@@ -113,10 +194,10 @@ def build_estimate(*, generation_id: str, artist_id: str,
               for t in blended}
 
     blended_pct = blend.largest_remainder_pcts(blended)
-    influence = []
+    shares = []
     for track_id, share in sorted(blended.items(), key=lambda kv: -kv[1]):
         lo, hi = ranges[track_id]
-        influence.append({
+        shares.append({
             "track_id": track_id,
             "title": titles[track_id],
             "exposure_share_pct": round(exposure[track_id] * 100, 4),
@@ -139,8 +220,14 @@ def build_estimate(*, generation_id: str, artist_id: str,
             "embedding_version": embedding_version,
             "similarity_informative": sim_weights is not None,
             "temperature": temperature,
+            "reads_as": "resemblance",
+            # The raw per-track cosines, one column of the matrix the
+            # collapse readings need. Stored so the NEXT estimate for this
+            # adapter can judge the signal across outputs; the blended
+            # share would not do (it carries the constant exposure prior).
+            "similarity_scores": {t: round(float(v), 6) for t, v in scores.items()},
         },
-        "influence": influence,
+        "influence": shares,
         "splits": splits,
         "caveats": caveats,
     }
@@ -152,15 +239,7 @@ def build_estimate(*, generation_id: str, artist_id: str,
     # measured version of `similarity_informative` beside it: that boolean
     # reads the spread WITHIN one output, and this reads variation ACROSS
     # outputs — the failure the boolean cannot see.
-    reliability = _reliability_block(recent_similarity, scores)
     document["method"]["reliability"] = reliability
-    if reliability.get("verdict") == "collapsed":
-        # The caveats list is what every surface in both rooms already
-        # renders; a verdict buried in `method` would be invisible.
-        caveats.append(
-            "Across recent outputs this catalogue's similarity signal did not vary with "
-            "the output (" + str(reliability.get("why", "")) + "). Read these shares as "
-            "the exposure prior.")
     if output_metadata is not None and track_metadata:
         document["method"]["aspects"] = _aspects.aspect_shares(
             output_metadata, {t: m for t, m in track_metadata.items() if t in blended},
@@ -177,14 +256,10 @@ def _reliability_block(recent: dict | None, this_output: dict[str, float]) -> di
     perfectly ordinary one output at a time. That is why the estimator's own
     ``SPREAD_FLOOR``, which reads one column, cannot see it.
 
-    The caller supplies the earlier columns. TODAY NOTHING STORES THEM: an
-    estimate document records the softmax share, not the raw cosines, and
-    feeding the blended share here is forbidden (it contains the exposure
-    prior, which is constant across outputs and would manufacture the
-    collapse). So every estimate written in either room carries ``unknown``
-    until a per-output similarity column is persisted somewhere. That is a
-    missing producer, not a missing method, and saying so is the point of
-    this paragraph.
+    The caller supplies the earlier columns, read back from earlier estimate
+    documents with ``recent_similarity_from_documents``. Until an adapter
+    has ``diagnostics.MIN_QUERIES`` outputs on file the verdict is
+    ``unknown``, which is the honest answer for a new adapter.
     """
     if not recent:
         return {"verdict": "unknown",

@@ -11,7 +11,8 @@ The method, in full (this docstring is the reference the estimate's
 
 1. **Exposure prior.** Each training track's share of the adapter's
    training segments. Deterministic, auditable, and the defensible floor:
-   absent evidence of differential influence, influence follows exposure.
+   absent evidence that the output resembles one track more than another,
+   shares follow exposure.
 
 2. **Similarity likelihood.** Cosine similarity of the output's CLAP
    embedding against each track's segment embeddings (mean of the top-k
@@ -36,7 +37,7 @@ The method, in full (this docstring is the reference the estimate's
    method actually has.
 
 5. **Money.** A party's share of the output = Σ over tracks
-   (track influence × party's share of that track). Tracks without rights
+   (track share × party's share of that track). Tracks without rights
    records contribute to `unattributed_pct`, reported and never silently
    renormalised away — a splits sheet that quietly absorbed unknown
    ownership would be lying with clean margins.
@@ -48,10 +49,15 @@ import math
 
 import numpy as np
 
-ESTIMATOR_VERSION = "0.4.0"   # 0.4.0: the method block gained reliability
-# and (when the caller supplies descriptors) aspects. The version moves
-# because the DOCUMENT moved: two estimates both stamped 0.3.0 could
-# otherwise differ in whether they carry a reliability verdict.
+ESTIMATOR_VERSION = "0.5.0"
+# 0.5.0 (2026-09-11): the first caveat names the method as resemblance; a
+# collapsed reliability verdict now falls back to the exposure prior instead
+# of footnoting the blended share; `method.similarity_scores` stores the raw
+# per-track cosines so the next estimate can judge the signal across outputs.
+# 0.4.0: the method block gained reliability and (when the caller supplies
+# descriptors) aspects. The version moves because the DOCUMENT moved: two
+# estimates both stamped the same version could otherwise differ in what
+# they carry or how a collapsed signal was handled.
 # exposure_basis moved to a per-document string naming the data source
 # ("live Workshop store" / "bundled at artist import") — see estimator.py.
 TOP_K = 3            # segments per track that speak for it

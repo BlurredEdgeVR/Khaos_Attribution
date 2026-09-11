@@ -141,17 +141,17 @@ def validate_track_rights(record):
 def validate_attribution_estimate(record):
     """Validate an attribution estimate; raise AttributionValidationError if invalid.
 
-    Beyond the schema: blended influence shares plus the unattributed share
+    Beyond the schema: blended shares plus the unattributed share
     must account for the whole output (sum to 100), and every range must
     contain its point estimate — a number outside its own uncertainty
     interval is a claim no method made.
     """
     _validate(record, "attribution_estimate.schema.json", "attribution estimate")
-    influence_total = sum(t["blended_share_pct"] for t in record["influence"])
-    if abs(influence_total - 100.0) > _SHARE_TOLERANCE:
+    share_total = sum(t["blended_share_pct"] for t in record["influence"])
+    if abs(share_total - 100.0) > _SHARE_TOLERANCE:
         raise AttributionValidationError(
-            f"Invalid attribution estimate: blended influence sums to "
-            f"{influence_total:g}, not 100")
+            f"Invalid attribution estimate: the blended share total sums to "
+            f"{share_total:g}, not 100")
     for entry in record["influence"]:
         lo, hi = entry["share_range_pct"]
         point = entry["blended_share_pct"]

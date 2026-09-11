@@ -35,6 +35,8 @@ they were established — see that repo's git history for the evidence):
    clang. Eager mode is more than fast enough.
 """
 
+from __future__ import annotations
+
 import logging
 import os
 import secrets
