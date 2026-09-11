@@ -32,6 +32,8 @@ Heavy deps stay lazy (numpy, soundfile) so the schema package remains
 light — the pattern watermark.py set.
 """
 
+from __future__ import annotations
+
 FINGERPRINT_VERSION = "v1"
 
 _FREQ_MIN_HZ = 40.0

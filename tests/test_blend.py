@@ -196,3 +196,24 @@ def test_ranges_are_temperature_sensitivity_not_ingredient_spread():
     assert (hi - lo) < (old_hi - old_lo), (
         "the sweep interval should be tighter than the ingredient spread")
 
+
+
+def test_the_temperature_sweep_is_what_makes_the_range_a_range():
+    """TEMPERATURE_SWEEP is the width of every uncertainty range an artist
+    sees, and until 2026-09-11 the suite passed with the sweep collapsed to
+    (1.0,) — a document would have shown [x, x] as its interval and no test
+    minded. The default must reach both sides of 1.0 and must move the
+    shares; a single-factor sweep must give the degenerate interval."""
+    assert min(blend.TEMPERATURE_SWEEP) < 1.0 < max(blend.TEMPERATURE_SWEEP)
+    exposure = {"a": 0.5, "b": 0.3, "c": 0.2}
+    scores = {"a": 0.30, "b": 0.60, "c": 0.45}
+    _, temperature = blend.similarity_weights(scores)
+    swept = blend.temperature_sweep_ranges(exposure, scores, temperature)
+    assert all(hi > lo for lo, hi in swept.values()), "the sweep moved nothing"
+    single = blend.temperature_sweep_ranges(exposure, scores, temperature, factors=(1.0,))
+    assert all(hi == lo for lo, hi in single.values())
+    # Halving the temperature sharpens: the best-scoring track's high bound
+    # is its share at the sharp end, and the worst's low bound at the same end.
+    sharp = blend.blend_shares(exposure, blend.softmax_weights(scores, temperature * 0.5))
+    assert swept["b"][1] == pytest.approx(sharp["b"])
+    assert swept["a"][0] == pytest.approx(sharp["a"])

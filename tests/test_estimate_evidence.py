@@ -119,10 +119,71 @@ def test_the_document_still_validates_with_both_blocks_present():
     assert "reliability" in doc["method"] and "aspects" in doc["method"]
 
 
-def test_the_existing_estimate_is_unchanged_by_the_new_blocks():
-    """Adding evidence must not move a single share."""
+def test_informative_evidence_does_not_move_a_share():
+    """Evidence that the signal varies across outputs is a reading, not an
+    ingredient: it must leave every share where the blend put it."""
+    rng = np.random.default_rng(3)
+    recent = {f"g{i}": {t: float(v) for t, v in zip(("t1", "t2", "t3"), rng.normal(size=3))}
+              for i in range(12)}
     plain = _estimate()
-    with_evidence = _estimate(recent_similarity={f"g{i}": {"t1": 0.8, "t2": 0.4, "t3": 0.6}
-                                                 for i in range(9)})
+    with_evidence = _estimate(recent_similarity=recent)
+    assert with_evidence["method"]["reliability"]["verdict"] == "informative"
     assert plain["influence"] == with_evidence["influence"]
     assert plain["splits"] == with_evidence["splits"]
+
+
+def test_a_collapsed_signal_changes_the_number_not_just_the_footnote():
+    """The 2026-09-11 release review: a signal the diagnostics call collapsed
+    still showed a 69% blended share with a caveat appended. A signal that
+    returns the same tracks whatever was generated is not evidence about
+    this output, so the honest share is the exposure prior — and the
+    document must say resemblance was not used."""
+    plain = _estimate()
+    collapsed = _estimate(recent_similarity={f"g{i}": {"t1": 0.8, "t2": 0.4, "t3": 0.6}
+                                             for i in range(10)})
+    assert collapsed["method"]["reliability"]["verdict"] == "collapsed"
+    assert plain["influence"] != collapsed["influence"], "the share did not move"
+    for entry in collapsed["influence"]:
+        # One 4-dp step is the largest-remainder rounding that makes the
+        # shares sum to exactly 100; anything more is a moved share.
+        assert abs(entry["blended_share_pct"] - entry["exposure_share_pct"]) <= 0.0001
+        assert entry["similarity_share_pct"] is None
+        lo, hi = entry["share_range_pct"]
+        assert lo == hi and abs(lo - entry["blended_share_pct"]) <= 0.0001
+    assert collapsed["method"]["similarity_informative"] is False
+    assert collapsed["method"]["temperature"] is None
+    assert any("Resemblance was therefore not used" in c for c in collapsed["caveats"])
+
+
+def test_each_document_stores_its_own_similarity_column():
+    """The one input the collapse readings need and nothing used to store:
+    without it every estimate ever written read `unknown`."""
+    doc = _estimate()
+    col = doc["method"]["similarity_scores"]
+    assert set(col) == {"t1", "t2", "t3"}
+    assert col["t1"] > col["t3"] > col["t2"]     # OUT is nearest t1, then t3
+    assert doc["method"]["reads_as"] == "resemblance"
+
+
+def test_recent_columns_are_read_back_from_earlier_documents():
+    """The producer's whole job is to hand back its earlier documents; the
+    contract picks the right adapter, skips the output being estimated and
+    documents without the block, and keeps the newest `limit`."""
+    from khaos_attribution.estimator import recent_similarity_from_documents
+    docs = []
+    for i in range(12):
+        d = _estimate(generation_id=f"g{i}")
+        d["created_at"] = f"2026-09-11T00:00:{i:02d}+00:00"
+        docs.append(d)
+    docs.append({**docs[0], "adapter_version": "other_run", "generation_id": "x"})
+    docs.append({"generation_id": "old", "adapter_version": "run_1",
+                 "method": {"estimator_version": "0.4.0"}})      # pre-0.5.0: no column
+    docs.append("not a document")
+    recent = recent_similarity_from_documents(docs, adapter_version="run_1",
+                                              exclude_generation_id="g11", limit=8)
+    assert "g11" not in recent and "x" not in recent and "old" not in recent
+    assert list(recent) == [f"g{i}" for i in range(3, 11)], "newest `limit` by created_at"
+    assert recent["g3"] == docs[3]["method"]["similarity_scores"]
+    # And the round trip reaches a verdict: identical outputs are collapsed.
+    rel = _estimate(recent_similarity=recent)["method"]["reliability"]
+    assert rel["verdict"] == "collapsed"
