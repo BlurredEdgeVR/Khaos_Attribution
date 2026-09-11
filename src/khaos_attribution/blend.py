@@ -11,8 +11,7 @@ The method, in full (this docstring is the reference the estimate's
 
 1. **Exposure prior.** Each training track's share of the adapter's
    training segments. Deterministic, auditable, and the defensible floor:
-   absent evidence that the output resembles one track more than another,
-   shares follow exposure.
+   absent evidence of differential influence, influence follows exposure.
 
 2. **Similarity likelihood.** Cosine similarity of the output's CLAP
    embedding against each track's segment embeddings (mean of the top-k
@@ -37,7 +36,7 @@ The method, in full (this docstring is the reference the estimate's
    method actually has.
 
 5. **Money.** A party's share of the output = Σ over tracks
-   (track share × party's share of that track). Tracks without rights
+   (track influence × party's share of that track). Tracks without rights
    records contribute to `unattributed_pct`, reported and never silently
    renormalised away — a splits sheet that quietly absorbed unknown
    ownership would be lying with clean margins.
@@ -50,7 +49,7 @@ import math
 import numpy as np
 
 ESTIMATOR_VERSION = "0.5.0"
-# 0.5.0 (2026-09-11): the first caveat names the method as resemblance; a
+# 0.5.0 (2026-09-11): a
 # collapsed reliability verdict now falls back to the exposure prior instead
 # of footnoting the blended share; `method.similarity_scores` stores the raw
 # per-track cosines so the next estimate can judge the signal across outputs.

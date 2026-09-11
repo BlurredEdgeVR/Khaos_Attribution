@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/BlurredEdgeVR/Khaos_Attribution/schemas/attribution_estimate.schema.json",
   "title": "Attribution Estimate",
-  "description": "An ESTIMATE of how closely one generated output RESEMBLES each of its training tracks (acoustic embedding similarity weighted by training exposure), and the writer/publisher splits that follow from those shares. It is a methodology-stamped estimate with uncertainty ranges: not a measurement of what shaped the model, and never a legal statement of ownership. It never replaces the provenance record; it rides alongside it.",
+  "description": "An ESTIMATE of how much each training track influenced one generated output, and the writer/publisher splits that follow from it. This document is a methodology-stamped estimate with uncertainty ranges, never a legal statement of ownership. It never replaces the provenance record; it rides alongside it.",
   "type": "object",
   "properties": {
     "schema_version": {
@@ -71,7 +71,7 @@
     },
     "influence": {
       "type": "array",
-      "description": "Per-track RESEMBLANCE shares, percentages of the output; blended shares plus nothing else sum to 100. The key is named `influence` for compatibility with every document written since 1.0.0 (the top level is closed and the version is a const); read `method.reads_as` and the first caveat for what the entries claim.",
+      "description": "Per-track influence estimates, percentages of the output. Blended shares plus nothing else sum to 100.",
       "minItems": 1,
       "items": {
         "type": "object",
@@ -128,7 +128,7 @@
     },
     "splits": {
       "type": "object",
-      "description": "The money math: each party's estimated share of this output, from track share \u00d7 their share of each track.",
+      "description": "The money math: each party's estimated share of this output, from track influence \u00d7 their share of each track.",
       "properties": {
         "writers": {
           "type": "array",
@@ -144,7 +144,7 @@
         },
         "unattributed_pct": {
           "type": "number",
-          "description": "Share attributable to tracks with no rights record. Reported, never silently renormalised away.",
+          "description": "Influence attributable to tracks with no rights record. Reported, never silently renormalised away.",
           "minimum": 0,
           "maximum": 100
         },

@@ -151,7 +151,7 @@ def test_a_collapsed_signal_changes_the_number_not_just_the_footnote():
         assert lo == hi and abs(lo - entry["blended_share_pct"]) <= 0.0001
     assert collapsed["method"]["similarity_informative"] is False
     assert collapsed["method"]["temperature"] is None
-    assert any("Resemblance was therefore not used" in c for c in collapsed["caveats"])
+    assert any("exposure prior" in c for c in collapsed["caveats"])
 
 
 def test_each_document_stores_its_own_similarity_column():
@@ -161,7 +161,6 @@ def test_each_document_stores_its_own_similarity_column():
     col = doc["method"]["similarity_scores"]
     assert set(col) == {"t1", "t2", "t3"}
     assert col["t1"] > col["t3"] > col["t2"]     # OUT is nearest t1, then t3
-    assert doc["method"]["reads_as"] == "resemblance"
 
 
 def test_recent_columns_are_read_back_from_earlier_documents():

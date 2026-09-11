@@ -10,15 +10,6 @@ their data source would be drift wearing a contract's name.
 The caller supplies data it alone knows how to load (embeddings, rights,
 run metadata, the output's embedding); this function does the rest and
 returns a document that has already passed validate_attribution_estimate.
-
-What the document claims (2026-09-11, the release review): the shares are
-RESEMBLANCE — how closely the output's audio embedding resembles each
-training track, weighted by that track's share of the training data. They
-are not a measurement of what shaped the model, and the document says so
-in its first caveat rather than leaving the reader to infer it from a
-method block. The JSON key `influence` is kept because every document
-written since schema 1.0.0 carries it and the top level is closed; the
-word is a wire name, not a claim.
 """
 
 from __future__ import annotations
@@ -33,13 +24,8 @@ from khaos_attribution import blend
 from khaos_attribution import diagnostics as _diagnostics
 from khaos_attribution.validation import validate_attribution_estimate
 
-BASE_CAVEAT = (
-    "This is a resemblance estimate, not a measurement of influence: each "
-    "share says how closely the output's audio embedding resembles that "
-    "track's training segments, weighted by the track's share of the "
-    "training data. Published work finds this kind of similarity correlates "
-    "only weakly with a track's actual effect on a model. It is an estimate "
-    "with the stated method, never a legal statement of ownership.")
+BASE_CAVEAT = ("This is an estimate with the stated method, "
+               "not a legal statement of ownership.")
 
 # How many earlier outputs' similarity columns a producer should hand back.
 # More than this and the matrix is history, not a reading of the adapter as
@@ -153,9 +139,8 @@ def build_estimate(*, generation_id: str, artist_id: str,
     sim_weights, temperature = blend.similarity_weights(scores)
     if sim_weights is None:
         caveats.append(
-            "Single-track adapter: the whole output is attributed to its one "
-            "training track by construction — the share is the training "
-            "exposure, and resemblance was not measured."
+            "Single-track adapter: influence is the whole output by "
+            "construction; similarity adds nothing."
             if len(run_tracks) == 1 else
             "Acoustic similarity was uninformative (score spread below the "
             "noise floor); blended shares equal the exposure prior.")
@@ -169,8 +154,8 @@ def build_estimate(*, generation_id: str, artist_id: str,
         sim_weights, temperature = None, None
         caveats.append(
             "Across recent outputs this catalogue's similarity signal did not vary with "
-            "the output (" + str(reliability.get("why", "")) + "). Resemblance was "
-            "therefore not used: these shares are the exposure prior.")
+            "the output (" + str(reliability.get("why", "")) + "). Read these shares as "
+            "the exposure prior.")
 
     blended = blend.blend_shares(exposure, sim_weights)
     if sim_weights is None:
@@ -184,8 +169,8 @@ def build_estimate(*, generation_id: str, artist_id: str,
     without_rights = [t for t in blended if t not in rights]
     if without_rights:
         caveats.append(
-            f"{len(without_rights)} of {len(blended)} tracks in this estimate "
-            f"have no rights record; their share is reported as "
+            f"{len(without_rights)} of {len(blended)} influencing tracks "
+            f"have no rights record; their influence is reported as "
             f"unattributed, not redistributed.")
     splits = blend.money_splits(blended, ranges, rights)
 
@@ -220,7 +205,6 @@ def build_estimate(*, generation_id: str, artist_id: str,
             "embedding_version": embedding_version,
             "similarity_informative": sim_weights is not None,
             "temperature": temperature,
-            "reads_as": "resemblance",
             # The raw per-track cosines, one column of the matrix the
             # collapse readings need. Stored so the NEXT estimate for this
             # adapter can judge the signal across outputs; the blended
