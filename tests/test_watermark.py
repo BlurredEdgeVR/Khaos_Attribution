@@ -83,8 +83,11 @@ def test_unknown_issuer_is_an_error():
 # ---- watermarking v2: model-level allocation (docs/watermarking-v2.md) ----
 
 from khaos_attribution.watermark import (  # noqa: E402
+    ARTIST_BANDS,
+    ARTIST_BAND_SIZE,
     MACHINE_BANDS,
     allocate_model_watermark_id,
+    artist_band,
     legacy_watermark_ids,
 )
 
@@ -183,3 +186,24 @@ def test_retired_ids_are_spent_forever(tmp_path):
     assert retire_watermark_ids(home, [{"watermark_id": 1303}]) == 1
     assert retired_watermark_ids(home) == {1303}
     assert list(home.glob(f"{RETIRED_IDS_FILENAME}.corrupt-*"))
+
+
+def test_each_artist_has_a_band_of_its_own_and_the_old_bands_did_not_move():
+    """Twenty Workshops drawing from one band collide by about the thirtieth
+    run between them; a band per artist makes a cross-artist collision
+    impossible by construction. The laptop and studio bands, which have
+    issued IDs, keep their exact ranges."""
+    assert MACHINE_BANDS["laptop"] == range(32, 704)
+    assert MACHINE_BANDS["studio"] == range(704, 1376)
+    slots = [MACHINE_BANDS[artist_band(n)] for n in range(1, ARTIST_BANDS + 1)]
+    assert len(slots) == 20 and all(len(r) == ARTIST_BAND_SIZE for r in slots)
+    assert slots[0].start == 1376 and slots[-1].stop == MACHINE_BANDS["threadripper"].start
+    for a, b in zip(slots, slots[1:]):
+        assert a.stop == b.start
+    assert artist_band(7) == "artist-07"
+    with pytest.raises(ValueError):
+        artist_band(21)
+    # Two artists allocating with no knowledge of each other never meet.
+    ids_a = {allocate_model_watermark_id("artist-01", set()) for _ in range(40)}
+    ids_b = {allocate_model_watermark_id("artist-02", set()) for _ in range(40)}
+    assert not (ids_a & ids_b)
