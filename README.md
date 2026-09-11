@@ -88,25 +88,15 @@ closed and its `schema_version` is a const, so a key there would invalidate
 every estimate ever written. Both schemas otherwise reject unknown fields, so typos in field names fail validation
 rather than passing silently.
 
-## What the attribution estimate claims
+## What the attribution estimate carries about its own signal
 
-The estimate is a **resemblance** report: how closely the generated output's
-audio embedding resembles each training track (top-k mean cosine), weighted
-by that track's share of the training data, sharpened by an uncalibrated
-softmax, with a temperature-sweep range. It is not a measurement of what
-shaped the model — published work finds this kind of similarity correlates
-only weakly with a track's actual effect — and the document says so in its
-first caveat (`estimator.BASE_CAVEAT`) and in `method.reads_as`. The JSON
-key `influence` is kept for compatibility with every document written since
-schema 1.0.0; the entries are resemblance shares.
-
-Two things the document carries about its own signal, since estimator
-0.5.0: `method.similarity_scores` stores the raw per-track cosines, so a
-producer can hand the earlier documents for an adapter to
+Since estimator 0.5.0 `method.similarity_scores` stores the raw per-track
+cosines, so a producer can hand the earlier documents for an adapter to
 `estimator.recent_similarity_from_documents` and the next estimate can judge
-whether the signal varies across outputs at all (`method.reliability`); and
-when that verdict is `collapsed` the shares fall back to the exposure prior
-— the number changes, not just the footnote.
+whether the similarity signal varies across outputs at all
+(`method.reliability`); when that verdict is `collapsed` the influence
+shares fall back to the exposure prior — the number changes, not just the
+footnote.
 
 ## Running the tests
 
