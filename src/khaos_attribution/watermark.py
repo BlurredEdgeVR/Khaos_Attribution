@@ -122,11 +122,34 @@ def watermark_issuer(codeword: int) -> str | None:
 # retired per-output scheme are frozen out (legacy_watermark_ids.json) so a
 # decoded ID is owned by at most one thing.
 
+# Artists' machines (2026-09-11, the closed release): each artist's
+# Workshop draws from a band of its OWN, so two artists can never issue the
+# same run ID — allocation only knows the cards on its own disk, and twenty
+# Workshops sharing one 672-payload band reach a 50 % collision chance by
+# about the thirtieth run between them. Twenty slots of 24 payloads are
+# carved from the old threadripper band, which had never issued an ID; the
+# threadripper keeps the 192 above them. Each slot is 24 training runs per
+# artist before it is exhausted, which allocation reports loudly.
+ARTIST_BAND_START = 1376
+ARTIST_BAND_SIZE = 24
+ARTIST_BANDS = 20
+
+
+def artist_band(n: int) -> str:
+    """The band name for artist slot n (1 … ARTIST_BANDS): 'artist-07'."""
+    if not 1 <= n <= ARTIST_BANDS:
+        raise ValueError(f"artist slot must be 1..{ARTIST_BANDS}, got {n}")
+    return f"artist-{n:02d}"
+
+
 MACHINE_BANDS: dict[str, range] = {
     "reserved":     range(0, 32),      # calibration + migration tooling
     "laptop":       range(32, 704),
     "studio":       range(704, 1376),
-    "threadripper": range(1376, 2048),
+    **{artist_band(n): range(ARTIST_BAND_START + (n - 1) * ARTIST_BAND_SIZE,
+                             ARTIST_BAND_START + n * ARTIST_BAND_SIZE)
+       for n in range(1, ARTIST_BANDS + 1)},                    # 1376 … 1855
+    "threadripper": range(ARTIST_BAND_START + ARTIST_BANDS * ARTIST_BAND_SIZE, 2048),
 }
 
 _LEGACY_IDS = None
