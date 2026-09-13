@@ -98,18 +98,23 @@ whether the similarity signal varies across outputs at all
 shares fall back to the exposure prior — the number changes, not just the
 footnote.
 
-## The Guild seal
+## The Guild seal and the marks row
 
-`khaos_attribution.seal` draws the circular Guild stamp — a registration
-number set on an arc around the Khaos star — as dependency-free SVG:
-`render_seal("123456")` returns the source, `python -m khaos_attribution.seal
-123456 out.svg` writes it, and `seal_for_provenance(document)` draws it for a
-verified provenance document and **refuses** unless
-`embedded_agrees_with_sidecar` is `True`. Type is vector paths from a
-committed glyph table (Red Hat Display Bold, OFL — licence beside it); there
-is no `<text>`, no font and nothing fetched at runtime, and the module's
-`SPEC.md` says why that must stay so. Rebuild the table with
-`tools/build_glyphs.py` only when the charset or the font changes.
+`khaos_attribution.seal` draws the Guild's hallmarks as dependency-free SVG.
+`render_seal(number, artist_mark, standard_version, date_letter)` is the
+ceremonial seal — the registration number on an arc, the interlaced Khaos
+star, three hand-struck punches — for certificates and the Register;
+`render_marks_row(artist_mark, standard_version, date_letter)` is the small
+functional row of four punches (artist, standard, Guild, year) for model
+cards, model pages and cover art. `seal_for_provenance(document)` and
+`marks_row_for_provenance(document)` read the values from a verified
+provenance document and **refuse** unless `embedded_agrees_with_sidecar` is
+`True`. Type is vector paths from a committed glyph table (Red Hat Display
+Bold, OFL — licence beside it); there is no `<text>`, no font and nothing
+fetched at runtime, and the module's `SPEC.md` says why that must stay so —
+and why the interlaced star is never drawn small. `python -m
+khaos_attribution.seal seal|marks …` writes either asset; rebuild the glyph
+table with `tools/build_glyphs.py` only when the charset or the font changes.
 
 ## Running the tests
 
