@@ -39,9 +39,11 @@ def test_no_text_element_font_or_fetch_in_either_output():
     for svg in (render_seal("GUILD/2026-000123", "CGD", "0.20.0", "Z"), render_marks_row("AB", "10", "C"),
                 render_marks_row("AB", "10", "C", reverse=True, rough=True)):
         assert "<text" not in svg and "<textPath" not in svg
-        assert "<title>Guild of Fine Tuners" in svg or "marks" not in svg.split("\n")[1]   # the seal's title is metadata, not type
         assert "font" not in svg.lower() and "@import" not in svg
         assert "http" not in svg.replace('xmlns="http://www.w3.org/2000/svg"', "")
+    # the seal carries a <title> (metadata, not type); the marks row carries none
+    assert "<title>Guild of Fine Tuners seal" in render_seal(*ARGS)
+    assert "<title>" not in render_marks_row("CG", "1.0", "A")
 
 
 def test_rendering_needs_no_font_and_no_environment():

@@ -70,7 +70,6 @@ PAPER = "#ffffff"
 # artwork on a paper disc, for dark artwork.
 COLOURWAYS = {"ink": {"field": "#0b0f0e", "art": "#ffffff"},
               "paper": {"field": "#f4f1ea", "art": "#0b0f0e"}}
-FIELD_FILL = COLOURWAYS["ink"]["field"]
 STAR_TRANSFORM = "translate(269.00,167.00) scale(0.42429)"    # 262 wide, centred (400, 298)
 STAR_STROKE_WIDTH = 3
 FOOT_POLYGON = "400,684 409,703 428,712 409,721 400,740 391,721 372,712 391,703"

@@ -3,9 +3,9 @@ time, never burned in.
 
 ``place_seal_on_artwork`` renders the seal with ``render_seal``, chooses a
 colourway against the corner it will sit in, and returns a NEW image: an
-SVG document that embeds the artwork untouched and lays the seal over its
-top right, rotated −4° about its own centre. The clean master is never
-modified — the artist keeps their own art without the mark, and an entry
+SVG document that embeds the artwork untouched and lays the seal over a
+corner (top right by default), rotated −4° about its own centre. The
+clean master is never modified — the artist keeps their own art without the mark, and an entry
 struck from the Register loses its seal without anyone re-rendering
 anything. Cache the composite if you cache at all; never the source.
 
@@ -28,7 +28,7 @@ __all__ = ["SealedArtwork", "place_seal_on_artwork", "choose_colourway", "CORNER
 
 # Measured against the artwork's WIDTH, whatever its shape.
 SEAL_DIAMETER = 0.15       # of W
-INSET = 0.05               # of W, to the seal's bounding box, top and right
+INSET = 0.05               # of W, to the seal's bounding box, from the two edges of its corner
 ROTATION = -4.0            # degrees, about the seal's own centre — deliberate; not a UI badge
 MIN_LONG_EDGE = 400        # px: below this the ring number stops being legible; the marks row goes on instead
 MARKS_HEIGHT = 0.12        # of W, the marks row's height when it stands in
@@ -116,7 +116,7 @@ CORNERS = ("top-right", "bottom-right")
 def place_seal_on_artwork(artwork, number: str, artist_mark: str, standard_version: str,
                           date_letter: str, *, colourway: str | None = None,
                           corner: str = "top-right") -> SealedArtwork:
-    """Composite the seal onto hero artwork, top right — a new image; the
+    """Composite the seal onto hero artwork — a new image; the
     source is never modified.
 
     ``artwork`` is a path, bytes or a Pillow image. ``colourway`` forces
