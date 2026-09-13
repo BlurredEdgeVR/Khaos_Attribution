@@ -47,6 +47,18 @@ def test_placement_is_measured_against_the_width_at_every_size(w, h):
     assert '<image href="data:image/png;base64,' in out.svg and f'width="{w}" height="{h}"/>' in out.svg
 
 
+@pytest.mark.parametrize("w,h", [(800, 800), (1600, 900), (600, 1000)])
+def test_the_seal_can_sit_bottom_right_with_the_same_insets(w, h):
+    out = A.place_seal_on_artwork(_png(w, h, (200, 200, 200)), *VALUES, corner="bottom-right")
+    d, inset = 0.15 * w, 0.05 * w
+    assert out.placed == "seal" and out.box == (w - inset - d, h - inset - d, d, d)
+    x, y, *_ = _nested(out.svg)
+    assert (x, y) == pytest.approx((w - inset - d, h - inset - d), abs=1e-3)
+    assert out.rotation == -4.0
+    with pytest.raises(SealRefused):
+        A.place_seal_on_artwork(_png(w, h, (200, 200, 200)), *VALUES, corner="middle")
+
+
 def test_the_colourway_is_chosen_by_the_corner_not_the_image_average():
     # a dark sleeve with a bright top-right corner: the average says dark, the corner says light
     dark_with_light_corner = _png(1000, 1000, (20, 20, 20), corner=(240, 240, 240))
