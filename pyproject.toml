@@ -19,11 +19,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=7", "soundfile>=0.12"]  # fingerprint survival tests decode real audio
+test = ["pytest>=7", "soundfile>=0.12", "pillow>=10"]  # fingerprint survival tests decode real audio; the seal-on-artwork tests read pixels
+# Placing the seal on hero artwork reads the artwork's pixels; the seal renderers themselves need nothing.
+artwork = ["pillow>=10"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
 khaos_attribution = ["schemas/*.json", "legacy_watermark_ids.json", "watermark_resets.json",
-                     "seal/glyphs.json", "seal/star.svg", "seal/OFL.txt", "seal/SPEC.md"]
+                     "seal/glyphs.json", "seal/star.svg", "seal/OFL.txt", "seal/SPEC.md",
+                     "seal/assets/*.svg"]
