@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "khaos_attribution"
-version = "0.19.0"
+version = "0.20.0"
 description = "JSON schemas and validators for artist attribution: provenance records and model cards."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -25,4 +25,5 @@ test = ["pytest>=7", "soundfile>=0.12"]  # fingerprint survival tests decode rea
 where = ["src"]
 
 [tool.setuptools.package-data]
-khaos_attribution = ["schemas/*.json", "legacy_watermark_ids.json", "watermark_resets.json"]
+khaos_attribution = ["schemas/*.json", "legacy_watermark_ids.json", "watermark_resets.json",
+                     "seal/glyphs.json", "seal/star.svg", "seal/OFL.txt", "seal/SPEC.md"]
