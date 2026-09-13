@@ -1,5 +1,5 @@
-"""The Guild seal and the marks row: byte-identical, font-free, struck only
-for an output whose watermark agreed with its sidecar."""
+"""The seal and marks of the Guild of Fine Tuners: byte-identical, font-free,
+struck only for an output whose watermark agreed with its sidecar."""
 from __future__ import annotations
 
 import json
@@ -39,6 +39,7 @@ def test_no_text_element_font_or_fetch_in_either_output():
     for svg in (render_seal("GUILD/2026-000123", "CGD", "0.20.0", "Z"), render_marks_row("AB", "10", "C"),
                 render_marks_row("AB", "10", "C", reverse=True, rough=True)):
         assert "<text" not in svg and "<textPath" not in svg
+        assert "<title>Guild of Fine Tuners" in svg or "marks" not in svg.split("\n")[1]   # the seal's title is metadata, not type
         assert "font" not in svg.lower() and "@import" not in svg
         assert "http" not in svg.replace('xmlns="http://www.w3.org/2000/svg"', "")
 
@@ -117,9 +118,12 @@ def test_the_date_letter_sits_inside_the_cartouche():
 
 # ── the ring ────────────────────────────────────────────────────────────────
 
-@pytest.mark.parametrize("number", ["7", "123456", "GUILD/2026-000123", "A B C 1 2 3"])
+@pytest.mark.parametrize("number", ["7", "123456", "2026-000123", "A B C 1 2"])
 def test_the_ring_run_is_centred_on_the_top_and_stays_inside_the_band(number):
-    glyphs = seal.layout(number)
+    """With the label in front, an eleven-character number still sits within
+    the top half; longer ones run further round and are accepted anyway —
+    the number's length is not this module's to limit."""
+    glyphs = seal.layout(seal.RING_PREFIX + number)
     r = seal.BASELINE_R
     first = glyphs[0]["theta"] - glyphs[0]["advance_px"] / 2 / r
     last = glyphs[-1]["theta"] + glyphs[-1]["advance_px"] / 2 / r
@@ -215,3 +219,45 @@ def test_the_licence_travels_with_the_table_and_the_font_does_not():
     text = (pkg / "OFL.txt").read_text()
     assert text.startswith("Copyright 2021 Red Hat, Inc.") and "Reserved Font Name Red Hat" in text
     assert not list((ROOT / "src").rglob("*.ttf")) and not list((ROOT / "tools").rglob("*.ttf"))
+
+
+# ── amendment 2: the inscription, the opaque number, the naming ─────────────
+
+def test_the_ring_carries_the_fixed_label_and_the_number_exactly_as_given():
+    """The label is set inside the renderer; the number is opaque — never
+    computed, padded, cased or reformatted, only set. A leading zero stays;
+    a nine-character number is as welcome as a six; nothing chooses a digit
+    count here (the watermark payload's capacity is an upstream question)."""
+    assert seal.RING_PREFIX == "REGISTER No: "
+    assert seal.TYPE_SIZE == 44.0 and seal.TRACKING == 9.0 and seal.BASELINE_R == 290.0   # 298.6 was rejected
+    for number in ("123456", "000042", "7", "2026-000123", "A/9"):
+        chars = [g["char"] for g in seal.layout(seal.RING_PREFIX + number)]
+        assert "".join(chars) == "REGISTER No: " + number
+        svg = render_seal(number, "CG", "1.0", "A")
+        # the ring's glyph count is the inscription's non-space characters, no more, no fewer
+        ring = svg.split('<g fill="#ffffff">')[1].split("</g>")[0]
+        assert ring.count("<path ") == len(("REGISTER No: " + number).replace(" ", ""))
+        assert f"<title>Guild of Fine Tuners seal — REGISTER No: {number}</title>" in svg
+    # the provenance reading passes the number through untouched
+    v = seal.provenance_values({"record": {**RECORD, "watermark_id": "000042"}, "embedded_agrees_with_sidecar": True})
+    assert v["number"] == "000042"
+    assert seal.provenance_values(DOC)["number"] == "36388"
+    # lowercase is a character the table cannot set for an input — refused, never uppercased into something else
+    with pytest.raises(SealRefused):
+        render_seal("no", "CG", "1.0", "A")
+
+
+def test_the_label_is_never_carried_by_the_marks_row():
+    assert "REGISTER" not in render_marks_row("CG", "1.0", "A")
+    assert "<title>" not in render_marks_row("CG", "1.0", "A")
+
+
+def test_the_foundations_name_is_in_no_filename_module_or_public_identifier():
+    """Human-readable text only: a rename must be a find-and-replace."""
+    pkg = ROOT / "src" / "khaos_attribution" / "seal"
+    for path in list(pkg.iterdir()) + [ROOT / "tools" / "build_glyphs.py", GOLDEN_SEAL, GOLDEN_MARKS]:
+        assert "khaos" not in path.name.lower(), path.name
+    for name in seal.__all__:
+        assert "khaos" not in name.lower(), name
+    for svg in (render_seal(*ARGS), render_marks_row("CG", "1.0", "A")):
+        assert 'id="' not in svg or all("khaos" not in i.lower() for i in svg.split('id="')[1:])

@@ -11,7 +11,7 @@ from khaos_attribution.seal import SealRefused, render_marks_row, render_seal
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="python -m khaos_attribution.seal",
-                                description="Write the Guild seal or the marks row as SVG.")
+                                description="Write the seal or the marks row of the Guild of Fine Tuners as SVG.")
     sub = p.add_subparsers(dest="asset", required=True)
     s = sub.add_parser("seal", help="the ceremonial seal")
     s.add_argument("number"); s.add_argument("artist_mark"); s.add_argument("standard_version")

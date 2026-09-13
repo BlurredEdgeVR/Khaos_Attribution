@@ -1,4 +1,12 @@
-# The Guild seal and the marks row — geometry and the constraints
+# The seal and the marks row of the Guild of Fine Tuners — geometry and the constraints
+
+## Naming
+
+The members' body is the **Guild of Fine Tuners** — the Guild, after first
+mention. The **Khaos Foundation** holds the Register; its trustees are the
+**Guardians**. The Foundation's name is subject to a trade mark question:
+it appears in human-readable text only, never in a filename, module name or
+public identifier, so a rename is a find-and-replace.
 
 Two assets, one set of punch primitives. Rendered by
 `khaos_attribution.seal.render_seal` and `render_marks_row`; bound to a
@@ -6,8 +14,9 @@ verified provenance document by `seal_for_provenance` and
 `marks_row_for_provenance`.
 
 **The seal** is ceremonial: certificates, the Register page header, anything
-physical. Ring type, the full interlaced Khaos star presiding, three punches
-beneath it. **The marks row** is small and functional: model cards, model
+physical. The ring inscription — `REGISTER No:` and the register number —
+the full interlaced Khaos star presiding, three punches beneath it. The
+marks say who examined the model; the ring carries only the number. **The marks row** is small and functional: model cards, model
 pages, cover art. Four punches in a line, no ring, no field, a reduced solid
 star in the Guild punch.
 
@@ -25,9 +34,10 @@ library). `tests/test_seal.py` refuses any output containing `<text` or
 `<textPath`. Do not reintroduce either; to add a glyph, extend the charset
 and rebuild the table.
 
-Charset: `A-Z 0-9 : . - /` and space. Each entry: `d` (SVG path, 1000-unit
-em, y up as the font has it), `advance`, `bounds` (`[xmin, ymin, xmax,
-ymax]`, `null` for space).
+Charset for inputs: `A-Z 0-9 : . - /` and space. The table also holds one
+lowercase glyph, `o`, for the ring label's fixed "No:" — no input may use
+it. Each entry: `d` (SVG path, 1000-unit em, y up as the font has it),
+`advance`, `bounds` (`[xmin, ymin, xmax, ymax]`, `null` for space).
 
 ## Constraint 2: the interlaced star is never small
 
@@ -49,18 +59,26 @@ tests hold both halves of this.
 | Field circle | r 396, fill `#0b0f0e` |
 | Outer band rule | r 352, stroke `#ffffff`, width 7, no fill |
 | Inner band rule | r 276, stroke `#ffffff`, width 7, no fill |
-| Ring type | baseline r 290, size 46, tracking 6 after each glyph (none trailing), centred on the top, facing outward |
+| Ring inscription | the literal `REGISTER No: ` (capital N, lowercase o, colon, one space) followed by the number; baseline r 290, size 44, tracking 9 after each glyph (none trailing), centred on the top, facing outward |
 | Star | `translate(269.00,167.00) scale(0.42429)` — 262 wide, centred (400, 298); fill and stroke `#ffffff`, stroke-width 3, stroke-miterlimit 10 |
 | Punch row | `translate(229.80,467.10) scale(0.74)` — three cells 140 × 170, gap 20 (row 460 native), centred (400, 530) |
 | Foot ornament | polygon `400,684 409,703 428,712 409,721 400,740 391,721 372,712 391,703`; dots r 8 at (268, 684) and (532, 684) |
 
 ### Ring type (exact; implement as given)
 
-`theta` is 0 at the top and positive clockwise.
+**Baseline radius 290 is the approved setting.** 298.6 is the value that
+would centre the caps optically between the band rules at 276 and 352; it
+was tried and rejected. Do not correct it.
+
+The label is fixed inside the renderer (`RING_PREFIX`), never passed in:
+`render_seal` keeps its signature and takes the number alone.
+
+`theta` is 0 at the top and positive clockwise; `n` counts the whole
+inscription, label included.
 
 ```
-adv_i     = glyph advance × s,  s = 46 / 1000       # px
-total     = Σ adv_i + 6 × (n − 1)
+adv_i     = glyph advance × s,  s = 44 / 1000       # px
+total     = Σ adv_i + 9 × (n − 1)
 span      = total / 290
 start     = −span / 2                              # centres the run on the top
 theta_i   = start + (run_before_i + adv_i / 2) / 290
@@ -71,8 +89,19 @@ glyph:  translate(px, py) rotate(deg(theta_i)) scale(s, −s) translate(−adv_i
 
 `scale(s, −s)` flips the font's y-up outlines; the last translate centres
 each glyph on its advance; letters face outward as a consequence. A space is
-an advance with no mark. Baseline r 290, tallest glyph r ≈ 323, nothing
+an advance with no mark. Baseline r 290, tallest glyph r ≈ 322, nothing
 below r ≈ 289: inside the band (rule inner edges 279.5 and 348.5).
+
+### The number is opaque
+
+The label promises that the number resolves to a Register entry, so it is
+an **opaque sequential registration number issued at admission**. This
+module never derives it — not from the record hash, the model or anything
+else — and never generates, allocates, pads or reformats it: it comes in
+from the record and is set exactly as given. **Its format is an open
+question upstream**: it has to fit whatever the watermark payload can
+actually carry, so no digit count is chosen here and none is baked into a
+validator. The only refusal is a character the glyph table cannot set.
 
 ### Seal punches (within the row group; punch i at x = i × 160)
 
@@ -129,7 +158,8 @@ never carry meaning.
 `provenance_values(document)` reads the four values from a verified
 document — the Listening Space's provenance endpoint's shape: `record` plus
 `embedded_agrees_with_sidecar`. It **raises `SealRefused`** unless that flag
-is literally `True`. Then, from the record: the number is `watermark_id`;
+is literally `True`. Then, from the record: the number is `watermark_id`,
+as given (see "The number is opaque");
 `artist_mark`, `standard_version` and `date_letter` are read from those
 keys when the record carries them, else derived from what it does carry —
 the initials of `artist_name`, the `schema_version` as major.minor, the
