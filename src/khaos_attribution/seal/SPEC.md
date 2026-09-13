@@ -163,7 +163,7 @@ Measured against the artwork's **width** W, whatever its shape:
 | Setting | Value |
 |---|---|
 | Seal diameter | 0.15 W |
-| Inset from the top and right edges | 0.05 W, to the seal's bounding box (its unrotated canvas), not its visual edge |
+| Inset from the top and right edges | 0.05 W, to the seal's bounding box (its unrotated canvas), not its visual edge. `corner="bottom-right"` uses the same inset from the bottom and right edges instead (the Listening Space's hero uses it, 2026-09-13) |
 | Rotation | −4° about the seal's own centre — deliberate; it keeps the seal with the hand-struck punches and stops it reading as a UI badge. Never round it to zero. |
 
 **Colourway.** Two approved references under `assets/`: `guild-seal.svg`

@@ -23,7 +23,7 @@ from pathlib import Path
 
 from khaos_attribution.seal import COLOURWAYS, SealRefused, render_marks_row, render_seal
 
-__all__ = ["SealedArtwork", "place_seal_on_artwork", "choose_colourway",
+__all__ = ["SealedArtwork", "place_seal_on_artwork", "choose_colourway", "CORNERS",
            "SEAL_DIAMETER", "INSET", "ROTATION", "MIN_LONG_EDGE", "MARKS_HEIGHT", "MARKS_MIN_HEIGHT"]
 
 # Measured against the artwork's WIDTH, whatever its shape.
@@ -110,15 +110,21 @@ def _nest(svg: str, x: float, y: float, w: float, h: float) -> str:
             + sep + rest.rstrip("\n"))
 
 
+CORNERS = ("top-right", "bottom-right")
+
+
 def place_seal_on_artwork(artwork, number: str, artist_mark: str, standard_version: str,
-                          date_letter: str, *, colourway: str | None = None) -> SealedArtwork:
+                          date_letter: str, *, colourway: str | None = None,
+                          corner: str = "top-right") -> SealedArtwork:
     """Composite the seal onto hero artwork, top right — a new image; the
     source is never modified.
 
     ``artwork`` is a path, bytes or a Pillow image. ``colourway`` forces
     ``"ink"`` or ``"paper"`` (an artist's call); otherwise it is chosen by
     the mean luminance of the corner the seal will occupy, and the choice
-    is recorded either way.
+    is recorded either way. ``corner`` is ``"top-right"`` (the design's
+    default) or ``"bottom-right"``; the insets are the same, measured to
+    the seal's bounding box from the two edges it sits against.
 
     Below ``MIN_LONG_EDGE`` px on the output's long edge the seal's ring
     number is not legible, so the marks row is placed instead, bottom
@@ -128,6 +134,8 @@ def place_seal_on_artwork(artwork, number: str, artist_mark: str, standard_versi
     """
     if colourway is not None and colourway not in COLOURWAYS:
         raise SealRefused(f"colourway must be one of {sorted(COLOURWAYS)}, not {colourway!r}")
+    if corner not in CORNERS:
+        raise SealRefused(f"corner must be one of {CORNERS}, not {corner!r}")
     data, mime, image = _load(artwork)
     W, H = image.size
     d = SEAL_DIAMETER * W
@@ -137,7 +145,7 @@ def place_seal_on_artwork(artwork, number: str, artist_mark: str, standard_versi
 
     placed = None; box = None; chosen = None; used = None; luma = None; overlay = ""
     if max(W, H) >= MIN_LONG_EDGE and inset + d <= H:
-        box = (W - inset - d, inset, d, d)
+        box = (W - inset - d, inset if corner == "top-right" else H - inset - d, d, d)
         if colourway is None:
             luma = region_luminance(image, box)
             used, chosen = choose_colourway(luma), "sampled"
