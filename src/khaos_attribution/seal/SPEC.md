@@ -146,6 +146,47 @@ given as a **maximum**: a run wider than 100 units is set smaller to fit
 the die (a version string may not escape the shield). `artist_mark` is two
 or three characters; `date_letter` is one.
 
+## The seal on hero artwork (`seal/artwork.py`)
+
+`place_seal_on_artwork(artwork, number, artist_mark, standard_version,
+date_letter, *, colourway=None)` composites the seal onto a model's hero
+artwork, **top right**, and returns a **new image** — an SVG document that
+embeds the artwork's own bytes untouched and lays the seal over it. The
+clean master is never modified: the artist keeps their art without the
+mark, and an entry struck from the Register loses its seal without anyone
+re-rendering anything. Cache the composite if anything is cached; never
+the source. The composite is vector all the way down — no rasterisation
+here; a browser or an exporter rasterises at display or export time.
+
+Measured against the artwork's **width** W, whatever its shape:
+
+| Setting | Value |
+|---|---|
+| Seal diameter | 0.15 W |
+| Inset from the top and right edges | 0.05 W, to the seal's bounding box (its unrotated canvas), not its visual edge |
+| Rotation | −4° about the seal's own centre — deliberate; it keeps the seal with the hand-struck punches and stops it reading as a UI badge. Never round it to zero. |
+
+**Colourway.** Two approved references under `assets/`: `guild-seal.svg`
+(white artwork on an ink disc, for light artwork) and
+`guild-seal-light.svg` (ink artwork on a paper disc `#f4f1ea`, for dark
+artwork). The renderer reproduces both (`colourway="ink" | "paper"`), and
+`tests/test_seal_artwork.py` holds its geometry to the references to a
+thousandth. The choice is made by the **mean luminance of the region the
+seal will occupy — never the whole image**; a dark sleeve with a bright
+top-right corner is common and the image average gets it wrong. Above
+mid-grey the ink disc, below it the paper disc. `colourway=` overrides;
+the result records which was used and whether it was sampled or forced.
+
+**Minimum size.** Below 400 px on the output's long edge the register
+number in the ring stops being legible and the punches merge, so the
+**marks row** is placed instead, bottom right at the same 5 % inset,
+0.12 W tall. The row has no paper-ground variant, so its corner rule is
+the other way round: a light corner takes the ink marks on the art
+itself, a dark corner the white-on-ink row, which carries its own ground.
+Below 40 px of row height nothing is placed — the artwork comes back
+unmarked and `placed` says `None`. A seal that would not fit the height
+(a wide banner) falls back the same way.
+
 ## Roughening (off by default)
 
 `rough=True` wraps the outer group in `filter#struck` (fractal noise, base

@@ -43,7 +43,7 @@ from importlib import resources
 from typing import Sequence
 
 __all__ = [
-    "CHARSET", "SealRefused", "render_seal", "render_marks_row",
+    "CHARSET", "COLOURWAYS", "SealRefused", "render_seal", "render_marks_row",
     "seal_for_provenance", "marks_row_for_provenance", "provenance_values",
 ]
 
@@ -63,9 +63,14 @@ TRACKING = 9.0
 # The inscription's fixed label, set inside the renderer, never passed in.
 # Exactly this casing: capital N, lowercase o, colon, one space.
 RING_PREFIX = "REGISTER No: "
-FIELD_FILL = "#0b0f0e"
 INK = "#0b0f0e"
 PAPER = "#ffffff"
+# The two approved colourways (assets/guild-seal.svg, assets/guild-seal-light.svg):
+# "ink" is white artwork on an ink disc, for light artwork; "paper" is ink
+# artwork on a paper disc, for dark artwork.
+COLOURWAYS = {"ink": {"field": "#0b0f0e", "art": "#ffffff"},
+              "paper": {"field": "#f4f1ea", "art": "#0b0f0e"}}
+FIELD_FILL = COLOURWAYS["ink"]["field"]
 STAR_TRANSFORM = "translate(269.00,167.00) scale(0.42429)"    # 262 wide, centred (400, 298)
 STAR_STROKE_WIDTH = 3
 FOOT_POLYGON = "400,684 409,703 428,712 409,721 400,740 391,721 372,712 391,703"
@@ -304,9 +309,13 @@ def _validate_values(artist_mark, standard_version, date_letter) -> tuple[str, s
 
 
 def render_seal(number: str, artist_mark: str, standard_version: str, date_letter: str, *,
-                size: int = 800, rough: bool = False,
+                size: int = 800, rough: bool = False, colourway: str = "ink",
                 jitter: Sequence[tuple[float, float, float]] | None = None) -> str:
     """The ceremonial seal as SVG source.
+
+    ``colourway`` is ``"ink"`` (white on an ink disc, the default and the
+    golden) or ``"paper"`` (ink on a paper disc, for dark artwork) — the two
+    approved references under ``assets/``.
 
     ``size`` is the rendered width and height in px (the 800-unit canvas
     scaled by size / 800). ``rough`` enables the optional turbulence filter
@@ -322,28 +331,31 @@ def render_seal(number: str, artist_mark: str, standard_version: str, date_lette
     artist_mark, standard_version, date_letter = _validate_values(artist_mark, standard_version, date_letter)
     if not isinstance(size, int) or size <= 0:
         raise SealRefused("size must be a positive integer")
+    if colourway not in COLOURWAYS:
+        raise SealRefused(f"colourway must be one of {sorted(COLOURWAYS)}, not {colourway!r}")
+    field, art = COLOURWAYS[colourway]["field"], COLOURWAYS[colourway]["art"]
     jit = _resolve_jitter(SEAL_PUNCHES, jitter)
     contents = _punch_contents(artist_mark, standard_version, date_letter, guild=False)
     punches = "\n".join(
         _punch(shape, content, x=i * SEAL_PUNCH_PITCH, rotation=rot, dx=dx, dy=dy,
-               ink=PAPER, stroke_width=SEAL_PUNCH_STROKE)
+               ink=art, stroke_width=SEAL_PUNCH_STROKE)
         for i, ((shape, _sz, _b, *_), content, (rot, dx, dy)) in enumerate(zip(SEAL_PUNCHES, contents, jit)))
     star = "\n".join(
-        f'      {e} fill="{PAPER}" stroke="{PAPER}" stroke-width="{STAR_STROKE_WIDTH}" stroke-miterlimit="10"/>'
+        f'      {e} fill="{art}" stroke="{art}" stroke-width="{STAR_STROKE_WIDTH}" stroke-miterlimit="10"/>'
         for e in _star_elements())
-    dots = "\n".join(f'    <circle cx="{cx}" cy="{cy}" r="8" fill="{PAPER}"/>' for cx, cy in FOOT_DOTS)
+    dots = "\n".join(f'    <circle cx="{cx}" cy="{cy}" r="8" fill="{art}"/>' for cx, cy in FOOT_DOTS)
     defs, attr = _filter(rough)
     return (
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}" viewBox="0 0 {CANVAS} {CANVAS}">\n'
         f'  <title>Guild of Fine Tuners seal — {RING_PREFIX}{number}</title>\n'
         f'{defs}  <g{attr}>\n'
-        f'    <circle cx="{CENTRE:g}" cy="{CENTRE:g}" r="{FIELD_R}" fill="{FIELD_FILL}"/>\n'
-        f'    <circle cx="{CENTRE:g}" cy="{CENTRE:g}" r="{OUTER_RULE_R}" fill="none" stroke="{PAPER}" stroke-width="{RULE_WIDTH}"/>\n'
-        f'    <circle cx="{CENTRE:g}" cy="{CENTRE:g}" r="{INNER_RULE_R}" fill="none" stroke="{PAPER}" stroke-width="{RULE_WIDTH}"/>\n'
-        f'    <g fill="{PAPER}">\n{_ring_type(number)}\n    </g>\n'
+        f'    <circle cx="{CENTRE:g}" cy="{CENTRE:g}" r="{FIELD_R}" fill="{field}"/>\n'
+        f'    <circle cx="{CENTRE:g}" cy="{CENTRE:g}" r="{OUTER_RULE_R}" fill="none" stroke="{art}" stroke-width="{RULE_WIDTH}"/>\n'
+        f'    <circle cx="{CENTRE:g}" cy="{CENTRE:g}" r="{INNER_RULE_R}" fill="none" stroke="{art}" stroke-width="{RULE_WIDTH}"/>\n'
+        f'    <g fill="{art}">\n{_ring_type(number)}\n    </g>\n'
         f'    <g transform="{STAR_TRANSFORM}">\n{star}\n    </g>\n'
         f'    <g transform="{SEAL_PUNCH_TRANSFORM}">\n{punches}\n    </g>\n'
-        f'    <polygon points="{FOOT_POLYGON}" fill="{PAPER}"/>\n{dots}\n'
+        f'    <polygon points="{FOOT_POLYGON}" fill="{art}"/>\n{dots}\n'
         '  </g>\n</svg>\n')
 
 

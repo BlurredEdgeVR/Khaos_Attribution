@@ -114,7 +114,9 @@ provenance document and **refuse** unless `embedded_agrees_with_sidecar` is
 `True`. Type is vector paths from a committed glyph table (Red Hat Display
 Bold, OFL — licence beside it); there is no `<text>`, no font and nothing
 fetched at runtime, and the module's `SPEC.md` says why that must stay so —
-and why the interlaced star is never drawn small. `python -m
+and why the interlaced star is never drawn small. `seal.artwork.place_seal_on_artwork(...)` composites the seal onto hero
+artwork top right (a new image, the master untouched; Pillow via the
+`artwork` extra). `python -m
 khaos_attribution.seal seal|marks …` writes either asset; rebuild the glyph
 table with `tools/build_glyphs.py` only when the charset or the font changes.
 
