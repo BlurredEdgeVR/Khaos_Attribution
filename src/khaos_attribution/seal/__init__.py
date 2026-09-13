@@ -1,12 +1,20 @@
-"""The Guild seal and the marks row — hallmarks for a registered adapter.
+"""The seal and the marks row of the Guild of Fine Tuners — hallmarks for
+a registered adapter.
+
+The Guild is the members' body; the Khaos Foundation holds the Register;
+its trustees are the Guardians. (The Foundation's name is subject to a
+trade mark question: it appears in human-readable text only, never in a
+filename, module name or public identifier.)
 
 Two assets from one set of punch primitives:
 
 ``render_seal(number, artist_mark, standard_version, date_letter)``
-    Ceremonial. A circular stamp: the registration number set on an arc
-    around the field, the full interlaced Khaos star presiding, and three
-    hand-struck punches beneath it — artist, standard, year. Certificates,
-    the Register page header, anything physical.
+    Ceremonial. A circular stamp: the ring inscription ``REGISTER No:``
+    followed by the register number, the full interlaced Khaos star
+    presiding, and three hand-struck punches beneath it — artist,
+    standard, year. Certificates, the Register page header, anything
+    physical. The marks say who examined the model; the ring carries only
+    the number that resolves to the Register entry.
 ``render_marks_row(artist_mark, standard_version, date_letter)``
     Small and functional. Four punches in a line — artist, standard, Guild,
     year — no ring, no field. Model cards, model pages, cover art. The
@@ -46,9 +54,15 @@ FIELD_R = 396
 OUTER_RULE_R = 352
 INNER_RULE_R = 276
 RULE_WIDTH = 7
+# The ring. 290 is the APPROVED baseline radius: 298.6 would centre the caps
+# optically between the band rules at 276 and 352, and it was tried and
+# rejected — do not "correct" it (SPEC.md).
 BASELINE_R = 290.0
-TYPE_SIZE = 46.0
-TRACKING = 6.0
+TYPE_SIZE = 44.0
+TRACKING = 9.0
+# The inscription's fixed label, set inside the renderer, never passed in.
+# Exactly this casing: capital N, lowercase o, colon, one space.
+RING_PREFIX = "REGISTER No: "
 FIELD_FILL = "#0b0f0e"
 INK = "#0b0f0e"
 PAPER = "#ffffff"
@@ -93,6 +107,8 @@ JITTER_ROTATION = (-3.0, 3.0)
 JITTER_DX = (-1.0, 1.0)
 JITTER_DY = (-2.0, 4.0)
 
+# What a caller may pass: uppercase only. The table also holds the one
+# lowercase glyph the ring label needs, which no input may use.
 CHARSET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789:.-/ "
 DATE_LETTER_EPOCH = 2026      # the year whose letter is A; see provenance_values
 
@@ -153,8 +169,13 @@ def _text(value, what: str, *, min_len: int = 1, max_len: int | None = None) -> 
 
 # ── the ring type ───────────────────────────────────────────────────────────
 
-def layout(number: str) -> list[dict]:
+def layout(inscription: str) -> list[dict]:
     """Where each ring glyph goes: the exact arc layout from SPEC.md.
+
+    ``inscription`` is the whole ring string — ``RING_PREFIX`` plus the
+    number, exactly as given. Nothing here derives, pads or reformats the
+    number: it is an opaque register number issued at admission, and the
+    renderer only sets it.
 
     Advances are px (glyph advance × type size / 1000). The run's total arc
     length, tracking included, becomes an angle at the baseline radius and
@@ -163,13 +184,13 @@ def layout(number: str) -> list[dict]:
     """
     glyphs = _glyphs()
     scale = TYPE_SIZE / 1000.0
-    advances = [glyphs[c]["advance"] * scale for c in number]
-    total = sum(advances) + TRACKING * (len(number) - 1)
+    advances = [glyphs[c]["advance"] * scale for c in inscription]
+    total = sum(advances) + TRACKING * (len(inscription) - 1)
     span = total / BASELINE_R
     start = -span / 2.0
     out: list[dict] = []
     run_before = 0.0
-    for ch, adv in zip(number, advances):
+    for ch, adv in zip(inscription, advances):
         theta = start + (run_before + adv / 2.0) / BASELINE_R
         out.append({"char": ch, "advance_px": adv, "theta": theta,
                     "px": CENTRE + BASELINE_R * math.sin(theta),
@@ -181,7 +202,7 @@ def layout(number: str) -> list[dict]:
 def _ring_type(number: str) -> str:
     scale = TYPE_SIZE / 1000.0
     paths = []
-    for g in layout(number):
+    for g in layout(RING_PREFIX + number):
         if g["char"] == " ":
             continue                      # an advance, not a mark
         t = (f"translate({_num(g['px'])},{_num(g['py'])}) rotate({_num(math.degrees(g['theta']))}) "
@@ -294,7 +315,10 @@ def render_seal(number: str, artist_mark: str, standard_version: str, date_lette
     the three punches' (rotation, dx, dy); the provenance wrapper derives it
     from the record when asked to.
     """
-    number = _text(number, "registration number")
+    # The number is opaque: accepted as given (no digit count, no format —
+    # what the watermark payload can carry is decided upstream, SPEC.md),
+    # refused only for a character the table cannot set.
+    number = _text(number, "register number")
     artist_mark, standard_version, date_letter = _validate_values(artist_mark, standard_version, date_letter)
     if not isinstance(size, int) or size <= 0:
         raise SealRefused("size must be a positive integer")
@@ -311,6 +335,7 @@ def render_seal(number: str, artist_mark: str, standard_version: str, date_lette
     defs, attr = _filter(rough)
     return (
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}" viewBox="0 0 {CANVAS} {CANVAS}">\n'
+        f'  <title>Guild of Fine Tuners seal — {RING_PREFIX}{number}</title>\n'
         f'{defs}  <g{attr}>\n'
         f'    <circle cx="{CENTRE:g}" cy="{CENTRE:g}" r="{FIELD_R}" fill="{FIELD_FILL}"/>\n'
         f'    <circle cx="{CENTRE:g}" cy="{CENTRE:g}" r="{OUTER_RULE_R}" fill="none" stroke="{PAPER}" stroke-width="{RULE_WIDTH}"/>\n'
@@ -381,7 +406,8 @@ def provenance_values(document: dict, *, number_key: str = "watermark_id") -> di
     Refuses unless ``embedded_agrees_with_sidecar`` is literally ``True`` —
     the mark asserts the check passed. Then, from the record:
 
-    - ``number``: ``record[number_key]`` (the run's watermark ID), required;
+    - ``number``: ``record[number_key]`` as given — an opaque register number
+      issued at admission, never derived, padded or reformatted here;
     - ``artist_mark``: ``record["artist_mark"]`` when the record carries one,
       else the initials of ``artist_name`` (two or three A–Z/0–9 characters);
     - ``standard_version``: ``record["standard_version"]`` when present, else
@@ -419,7 +445,7 @@ def provenance_values(document: dict, *, number_key: str = "watermark_id") -> di
         m = re.match(r"(\d{4})", str(record.get("timestamp") or ""))
         if m:
             letter = chr(ord("A") + (int(m.group(1)) - DATE_LETTER_EPOCH) % 26)
-    values = {"number": str(number).upper(), "artist_mark": str(mark).upper(),
+    values = {"number": str(number), "artist_mark": str(mark).upper(),
               "standard_version": str(version), "date_letter": str(letter or "").upper()}
     for key, what in (("artist_mark", "an artist mark"), ("standard_version", "a standard version"),
                       ("date_letter", "a date letter")):

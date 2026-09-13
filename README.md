@@ -98,12 +98,14 @@ whether the similarity signal varies across outputs at all
 shares fall back to the exposure prior — the number changes, not just the
 footnote.
 
-## The Guild seal and the marks row
+## The seal and marks of the Guild of Fine Tuners
 
 `khaos_attribution.seal` draws the Guild's hallmarks as dependency-free SVG.
 `render_seal(number, artist_mark, standard_version, date_letter)` is the
-ceremonial seal — the registration number on an arc, the interlaced Khaos
-star, three hand-struck punches — for certificates and the Register;
+ceremonial seal — `REGISTER No:` and the register number on an arc, the
+interlaced Khaos star, three hand-struck punches — for certificates and the
+Register (the number is opaque: issued at admission, set as given, never
+derived here);
 `render_marks_row(artist_mark, standard_version, date_letter)` is the small
 functional row of four punches (artist, standard, Guild, year) for model
 cards, model pages and cover art. `seal_for_provenance(document)` and

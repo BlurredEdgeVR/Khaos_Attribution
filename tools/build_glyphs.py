@@ -23,7 +23,9 @@ import json
 import sys
 from pathlib import Path
 
-CHARSET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789:.-/ "
+# Inputs are uppercase-only (the renderer refuses anything else); the one
+# lowercase glyph is for the ring's fixed label "REGISTER No: ".
+CHARSET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789:.-/ o"
 OUT = Path(__file__).resolve().parents[1] / "src" / "khaos_attribution" / "seal" / "glyphs.json"
 
 
