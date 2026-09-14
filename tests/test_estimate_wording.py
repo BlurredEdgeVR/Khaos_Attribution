@@ -1,6 +1,5 @@
-"""The degenerate paths of the estimate say what happened, in words —
-and the guards around it fail with a sentence (2026-09-11).
-"""
+"""The degenerate paths of the estimate say what happened, in words, and
+the guards around it fail with a sentence."""
 from __future__ import annotations
 
 import numpy as np

@@ -45,9 +45,7 @@ def validate_model_card(record):
     return _validate(record, "model_card.schema.json", "model card")
 
 
-# Shares are money. JSON Schema can bound each share but cannot add them up,
-# so the sum checks live here — a rights record whose writers total 96% is
-# exactly the kind of quiet error that surfaces years later on a statement.
+# JSON Schema can bound each share but cannot add them up; the sum checks live here.
 _SHARE_TOLERANCE = 0.01
 
 
@@ -75,12 +73,8 @@ _CODE_RULES = {
 
 
 def _check_code_fields(record, record_kind):
-    """Say what is wrong with an ISRC/ISWC in words, not in regex.
-
-    The schema enforces identical rules; these checks run first so the
-    operator reads "marked 'assigned' but carries no code" instead of
-    "'' does not match '^T-[0-9]{9}-[0-9]$'".
-    """
+    """Say what is wrong with an ISRC/ISWC in words, not in regex; the
+    schema enforces identical rules, these run first."""
     import re
 
     for key, (pattern, hint) in _CODE_RULES.items():
@@ -99,9 +93,7 @@ def _check_code_fields(record, record_kind):
                 f"status says '{status}' — set the status to 'assigned' or "
                 f"clear the code.")
         if status != "assigned" and value == "":
-            # An empty string is "no code" to a human but a pattern
-            # violation to the schema — without this, '' leaks the regex
-            # this function exists to translate.
+            # An empty string is a pattern violation to the schema.
             raise AttributionValidationError(
                 f"Invalid {record_kind}: {key.upper()} carries an empty code "
                 f"string — omit the value entirely when the status is "
@@ -113,9 +105,8 @@ def _check_code_fields(record, record_kind):
 
 
 def validate_tombstone(record):
-    """Validate an output tombstone (watermarking v2 §6) — written at
-    deletion so deleted material stays identifiable in the wild.
-    Returns the record, like every other validator here."""
+    """Validate an output tombstone (watermarking v2 §6), written at
+    deletion so deleted material stays identifiable; returns the record."""
     _validate(record, "tombstone.schema.json", "output tombstone")
     return record
 
@@ -141,10 +132,8 @@ def validate_track_rights(record):
 def validate_attribution_estimate(record):
     """Validate an attribution estimate; raise AttributionValidationError if invalid.
 
-    Beyond the schema: blended influence shares plus the unattributed share
-    must account for the whole output (sum to 100), and every range must
-    contain its point estimate — a number outside its own uncertainty
-    interval is a claim no method made.
+    Beyond the schema: blended influence shares must sum to 100, and every
+    range must contain its point estimate.
     """
     _validate(record, "attribution_estimate.schema.json", "attribution estimate")
     influence_total = sum(t["blended_share_pct"] for t in record["influence"])

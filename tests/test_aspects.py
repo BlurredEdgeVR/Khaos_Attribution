@@ -1,9 +1,4 @@
-"""Per-aspect shares: the music theory has to be right, and the coverage honest.
-
-From the 2026-09-10 prior-art review: Aria argues a single scalar per track
-cannot support copyright analysis, because infringement is assessed aspect by
-aspect. These channels are built from descriptors Khaos already stores.
-"""
+"""Per-aspect shares: the music theory has to be right, and the coverage honest."""
 from __future__ import annotations
 
 import pytest
@@ -28,9 +23,7 @@ def test_relative_major_and_minor_are_related_in_both_directions():
 
 
 def test_a_key_three_semitones_away_the_WRONG_way_is_not_a_relative():
-    """The first cut tested 'three or nine semitones apart, opposite mode',
-    which accepts A minor against F# major. They share four notes, not
-    seven, and calling them related would inflate a harmony share."""
+    """A minor and F# major share four notes, not seven; they are not relatives."""
     assert key_agreement(_k("A", "minor"), _k("F#", "major")) == 0.0
     assert key_agreement(_k("C", "major"), _k("D#", "minor")) == 0.0
 
@@ -41,8 +34,7 @@ def test_the_dominant_is_related_and_the_enharmonic_spelling_does_not_matter():
 
 
 def test_an_unknown_key_is_none_not_a_disagreement():
-    """Scoring it zero would quietly push an unmeasured track's share to
-    nothing, which reads as a finding about the track."""
+    """Scoring an unknown key zero would read as a finding about the track."""
     assert key_agreement(None, _k("A", "minor")) is None
     assert key_agreement(_k("", ""), _k("A", "minor")) is None
     assert key_agreement(_k("H", "major"), _k("A", "minor")) is None
@@ -64,9 +56,7 @@ def test_metre_and_the_rhythm_blend():
         {"bpm": 120, "time_signature": {"numerator": 4}},
         {"bpm": 120, "time_signature": {"numerator": 3}})
     assert 0.7 < same_tempo_other_metre < 1.0
-    # Tempo alone still answers in full; METRE alone is capped at its own
-    # weight. 4/4 is near-universal, so an unmeasured tempo beside a shared
-    # metre used to score a perfect 1.0 and outrank a track 3 BPM out.
+    # Tempo alone answers in full; metre alone is capped at its own weight.
     assert rhythm_agreement({"bpm": 120}, {"bpm": 120}) == 1.0
     assert rhythm_agreement({"time_signature": {"numerator": 4}},
                             {"time_signature": {"numerator": 4}}) == METRE_WEIGHT
@@ -95,18 +85,15 @@ def test_each_channel_sums_to_a_hundred_and_reports_its_own_coverage():
 
 
 def test_a_channel_with_nothing_measurable_is_present_and_null():
-    """'We looked and could not say' must be distinguishable from 'we did
-    not look'."""
+    """'Could not say' must be distinguishable from 'did not look'."""
     r = aspect_shares({"bpm": None, "key": None}, {"t1": {"bpm": None, "key": None}})
     assert r["harmony"]["shares_pct"] is None and r["harmony"]["measured_tracks"] == 0
     assert "harmony" in r and "rhythm" in r and "timbre" in r
 
 
 def test_the_timbre_channel_is_the_blend_s_own_share_when_it_is_given_one():
-    """It used to normalise the raw cosines linearly while the estimate's
-    similarity_share_pct came from the blend's softmax — one document, two
-    numbers for 'the estimator's own CLAP similarity', one of them labelled
-    unchanged. On a real spread that was 74.9/18.6/6.5 against 35.4/33.1/31.4."""
+    """The timbre channel is the blend's softmax share, not a second
+    normalisation of the same cosines."""
     tracks = {"t1": TRACKS["t1"], "t2": TRACKS["t2"]}
     r = aspect_shares(OUT, tracks, timbre_weights={"t1": 0.749, "t2": 0.251})
     assert r["timbre"]["shares_pct"] == {"t1": 74.9, "t2": 25.1}
@@ -121,8 +108,7 @@ def test_without_the_blend_s_share_the_channel_says_it_is_not_the_same_number():
 
 
 def test_a_negative_cosine_can_never_produce_a_negative_or_over_100_share():
-    """CLAP cosines are signed. A signed sum gave 0.9/-0.85/0.1 the shares
-    600% / -566.7% / 66.7%, which summed to 100 and were not shares."""
+    """CLAP cosines are signed; a signed sum would give shares that are not shares."""
     r = aspect_shares(OUT, {"t1": TRACKS["t1"], "t2": TRACKS["t2"], "t3": TRACKS["t3"]},
                       timbre_scores={"t1": 0.9, "t2": -0.85, "t3": 0.1})
     shares = r["timbre"]["shares_pct"]
@@ -131,7 +117,7 @@ def test_a_negative_cosine_can_never_produce_a_negative_or_over_100_share():
 
 
 def test_all_measured_and_all_disagreeing_is_not_the_same_as_nothing_measurable():
-    """Both used to report shares_pct: null. One is a finding."""
+    """Both report shares_pct null; only one is a finding."""
     nothing = aspect_shares({"bpm": None, "key": None}, {"t1": {"bpm": None, "key": None}})
     assert nothing["harmony"]["unmeasurable"] is True
     disagree = aspect_shares({"key": _k("C", "major")},

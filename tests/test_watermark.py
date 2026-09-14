@@ -151,8 +151,8 @@ def test_resets_are_on_record_and_freed_ids_say_so():
 
 
 def test_legacy_ids_are_frozen_valid_codewords():
-    """Whatever the frozen list holds (empty since the 2026-08-22 reset)
-    must be clean codewords — the allocator subtracts them blindly."""
+    """Whatever the frozen list holds must be clean codewords; the allocator
+    subtracts them blindly."""
     legacy = legacy_watermark_ids()
     assert isinstance(legacy, frozenset)
     for codeword in legacy:
@@ -189,10 +189,8 @@ def test_retired_ids_are_spent_forever(tmp_path):
 
 
 def test_each_artist_has_a_band_of_its_own_and_the_old_bands_did_not_move():
-    """Twenty Workshops drawing from one band collide by about the thirtieth
-    run between them; a band per artist makes a cross-artist collision
-    impossible by construction. The laptop and studio bands, which have
-    issued IDs, keep their exact ranges."""
+    """A band per artist makes a cross-artist collision impossible; the laptop
+    and studio bands, which have issued IDs, keep their exact ranges."""
     assert MACHINE_BANDS["laptop"] == range(32, 704)
     assert MACHINE_BANDS["studio"] == range(704, 1376)
     slots = [MACHINE_BANDS[artist_band(n)] for n in range(1, ARTIST_BANDS + 1)]

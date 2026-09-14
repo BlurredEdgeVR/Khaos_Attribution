@@ -1,35 +1,13 @@
 """Landmark audio fingerprints, format v1 (watermarking v2 §5).
 
-Closed-set identification: the corpus is Khaos's own stored outputs, held
-in pristine form, and the watermark usually narrows a query to one
-model's outputs first — so this is deliberately the SIMPLE, classic
-constellation scheme (Wang 2003 family), numpy-only, no scipy/librosa.
-
-Format v1 (stable; the index stores (hash, offset_ms) pairs):
-
-- mono mix, magnitude STFT with a Hann window of ~93 ms and 50% hop,
-  computed at the audio's native rate; peaks are mapped to Hz and
-  seconds so fingerprints are sample-rate independent.
-- spectral peaks: local maxima over a (time, freq) neighbourhood, kept
-  above an adaptive floor, densest ~30 per second, 40 Hz–5 kHz.
-- landmarks: each peak pairs with up to 5 later peaks 0.1–1.6 s ahead
-  within ±1.5 kHz; hash packs (f1, f2, dt) quantised to (10, 10, 5) bits
-  → 25-bit integers. Frequency gets the bits (≈4.8 Hz/step): near-
-  harmonic coincidences between different pitches were the main
-  cross-match source; dt tolerates 48 ms steps because the offset
-  HISTOGRAM, not dt, carries the alignment precision.
-- matching: shared hashes vote on the time offset between query and
-  candidate; the winning offset's vote count is the score. A confident
-  match needs >= 12 aligned votes, >= 5% of the query's landmarks, AND
-  >= 8 DISTINCT hashes in the winning bucket. KNOWN LIMITATION: two
-  same-tempo percussive loops are near-identical to this whole
-  algorithm class (the constellation is the transient's) and can be
-  pairwise-confident against each other — closed-set callers must also
-  require DOMINANCE (best candidate >= 2x the runner-up), which the
-  true source clears decisively and an impostor does not.
-
-Heavy deps stay lazy (numpy, soundfile) so the schema package remains
-light — the pattern watermark.py set.
+A classic constellation scheme, numpy-only, for closed-set identification
+of Khaos's own stored outputs. Format v1 is stable: spectral peaks from a
+~93 ms Hann STFT, mapped to Hz and seconds so fingerprints are sample-rate
+independent; landmarks pair each peak with up to 5 later peaks, hashed as
+(f1, f2, dt) in (10, 10, 5) bits; matching votes shared hashes onto a time
+offset. Same-tempo percussive loops can be pairwise-confident against each
+other, so closed-set callers must also require dominance (best candidate
+>= 2x the runner-up). Heavy deps stay lazy.
 """
 
 from __future__ import annotations
@@ -147,9 +125,8 @@ def match_stats(query_fps: list, candidate_fps: list) -> tuple:
 
 def is_confident(votes: int, query_landmarks: int,
                  distinct: int | None = None) -> bool:
-    """distinct is the winning bucket's distinct-hash count; pass it
-    whenever available — it is the defense against loop/drone material
-    voting the same hash into alignment."""
+    """``distinct`` is the winning bucket's distinct-hash count; pass it
+    whenever available, as the defence against loop/drone material."""
     if distinct is not None and distinct < _MATCH_MIN_DISTINCT:
         return False
     return (votes >= _MATCH_MIN_VOTES

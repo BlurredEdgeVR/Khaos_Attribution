@@ -1,16 +1,11 @@
 """The seal on a model's hero artwork — composited at display or export
 time, never burned in.
 
-``place_seal_on_artwork`` renders the seal with ``render_seal``, chooses a
-colourway against the corner it will sit in, and returns a NEW image: an
-SVG document that embeds the artwork untouched and lays the seal over a
-corner (top right by default), rotated −4° about its own centre. The
-clean master is never modified — the artist keeps their own art without the mark, and an entry
-struck from the Register loses its seal without anyone re-rendering
-anything. Cache the composite if you cache at all; never the source.
-
-Pillow (the ``artwork`` extra) is needed to read the artwork's size and to
-sample the corner. The core renderers need nothing.
+``place_seal_on_artwork`` returns a new SVG that embeds the artwork
+untouched and lays the seal over a corner, rotated about its own centre,
+in the colourway that contrasts with that corner. The clean master is never
+modified. Pillow (the ``artwork`` extra) is needed to read the artwork's
+size and sample the corner; the core renderers need nothing.
 """
 
 from __future__ import annotations
@@ -60,9 +55,8 @@ def _pil():
 
 
 def _load(artwork) -> tuple[bytes, str, "object"]:
-    """(the artwork's own bytes, its MIME type, a Pillow image) — the bytes
-    are what the composite embeds, exactly as read; nothing is re-encoded
-    unless a Pillow image object (no bytes of its own) was passed."""
+    """(the artwork's bytes, its MIME type, a Pillow image); nothing is
+    re-encoded unless a Pillow image object was passed."""
     Image = _pil()
     if isinstance(artwork, (str, Path)):
         data = Path(artwork).read_bytes()
@@ -116,21 +110,13 @@ CORNERS = ("top-right", "bottom-right")
 def place_seal_on_artwork(artwork, number: str, artist_mark: str, standard_version: str,
                           date_letter: str, *, colourway: str | None = None,
                           corner: str = "top-right") -> SealedArtwork:
-    """Composite the seal onto hero artwork — a new image; the
-    source is never modified.
+    """Composite the seal onto hero artwork as a new image.
 
-    ``artwork`` is a path, bytes or a Pillow image. ``colourway`` forces
-    ``"ink"`` or ``"paper"`` (an artist's call); otherwise it is chosen by
-    the mean luminance of the corner the seal will occupy, and the choice
-    is recorded either way. ``corner`` is ``"top-right"`` (the design's
-    default) or ``"bottom-right"``; the insets are the same, measured to
-    the seal's bounding box from the two edges it sits against.
-
-    Below ``MIN_LONG_EDGE`` px on the output's long edge the seal's ring
-    number is not legible, so the marks row is placed instead, bottom
-    right at the same inset; below ``MARKS_MIN_HEIGHT`` for that row,
-    nothing is placed — the artwork comes back unmarked, and ``placed``
-    says so.
+    ``colourway`` forces ``"ink"`` or ``"paper"``; otherwise it is chosen by
+    the corner's mean luminance, and the choice is recorded either way.
+    Below ``MIN_LONG_EDGE`` px the marks row is placed instead, bottom
+    right; below ``MARKS_MIN_HEIGHT`` for that row nothing is placed and
+    ``placed`` says so.
     """
     if colourway is not None and colourway not in COLOURWAYS:
         raise SealRefused(f"colourway must be one of {sorted(COLOURWAYS)}, not {colourway!r}")
@@ -166,12 +152,9 @@ def place_seal_on_artwork(artwork, number: str, artist_mark: str, standard_versi
                 used, chosen = choose_colourway(luma), "sampled"
             else:
                 used, chosen = colourway, "override"
-            # The row has no paper-ground variant: ink marks sit on the art
-            # itself (legible only on a light corner), and the reversed row
-            # carries its own ink ground (legible anywhere). So the corner
-            # decides the other way round from the seal: a light corner takes
-            # the ink marks on the art ("paper" — the art is the ground), a
-            # dark corner the white-on-ink row ("ink").
+            # The row has no paper ground, so the corner decides the other way
+            # round from the seal: a light corner takes ink marks on the art
+            # ("paper"), a dark corner the reversed white-on-ink row ("ink").
             if chosen == "sampled":
                 used = "paper" if used == "ink" else "ink"
             marks = render_marks_row(artist_mark, standard_version, date_letter, reverse=(used == "ink"))

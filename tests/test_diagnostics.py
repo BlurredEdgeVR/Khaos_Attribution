@@ -1,11 +1,4 @@
-"""The collapse diagnostics must be able to say 'this signal means nothing'.
-
-From the 2026-09-10 prior-art review: Deng et al. measured CLAP-style
-similarity against causal influence at 0.014-0.068, and Aria showed that
-several published attribution results were artefacts of a signal that
-returned the same tracks whatever was generated. Khaos uses CLAP similarity.
-These readings are how an estimate reports whether its own signal moved.
-"""
+"""The collapse diagnostics must be able to say 'this signal means nothing'."""
 from __future__ import annotations
 
 import numpy as np
@@ -36,8 +29,7 @@ def test_a_signal_that_varies_is_called_informative():
 
 
 def test_too_few_outputs_is_unknown_and_never_either_answer():
-    """A new adapter has no evidence. That is not 'informative' and it is
-    not 'collapsed' — reporting either would be inventing a finding."""
+    """A new adapter has no evidence; neither 'informative' nor 'collapsed' applies."""
     for n in range(1, MIN_QUERIES):
         r = reliability(_rng().normal(size=(24, n)))
         assert r["verdict"] == "unknown", n
@@ -53,8 +45,7 @@ def test_constant_columns_are_counted_and_reported():
 
 def test_the_readings_are_taken_on_the_centred_matrix():
     """A large shared offset is the catalogue's mean similarity, not a
-    finding. Adding one must not turn a varied signal into a collapsed one —
-    it did, before the matrix was centred."""
+    finding; it must not turn a varied signal into a collapsed one."""
     varied = _rng().normal(size=(24, 16))
     assert reliability(varied)["verdict"] == "informative"
     assert reliability(varied + 50.0)["verdict"] == "informative"
@@ -81,9 +72,7 @@ def test_the_verdict_names_its_method_and_that_no_code_exists_to_copy():
 
 def test_each_band_alone_is_enough_to_call_collapse(monkeypatch):
     """The bands are what call it, proved by moving them rather than by
-    editing the readings. The first cut's docstring said 'with the band
-    moved to 1.1' and then mutated the readings dict instead, which proves
-    only that verdict() reads a key — and left RANK1_COLLAPSED untested."""
+    editing the readings."""
     import khaos_attribution.diagnostics as d
 
     rng = _rng()
@@ -108,9 +97,8 @@ def test_each_band_alone_is_enough_to_call_collapse(monkeypatch):
 
 
 def test_the_absolute_floor_catches_what_every_ratio_misses(monkeypatch):
-    """Kappa, the energy ratios and the concentration are all scale-free, so
-    a dead-flat signal plus 1e-9 of noise read 'informative' — the exact
-    failure this module exists to catch."""
+    """The ratios are scale-free, so a dead-flat signal plus 1e-9 of noise
+    would read 'informative' without the floor."""
     import khaos_attribution.diagnostics as d
 
     flat = np.full((40, 12), 0.42) + 1e-9 * _rng().normal(size=(40, 12))

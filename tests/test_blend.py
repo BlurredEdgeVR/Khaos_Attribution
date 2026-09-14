@@ -1,9 +1,4 @@
-"""The blend estimator's arithmetic — the canonical suite.
-
-blend.py lives in this contract package because both the Workshop and the
-Listening Space compute estimates from it. No CLAP, no files: every
-function is pure, so every property worth money is checkable with floats.
-"""
+"""The blend estimator's arithmetic: pure functions, checkable with floats."""
 
 from __future__ import annotations
 
@@ -50,9 +45,7 @@ def test_similarity_ignores_tracks_outside_the_run():
 
 
 def test_tight_clusters_are_declared_uninformative():
-    """Same-genre catalogues cluster in embedding space. A 0.001 spread is
-    noise, and pretending to read track-level signal from it would put
-    astrology on a royalty statement."""
+    """A 0.001 spread is noise, not track-level signal."""
     weights, temperature = blend.similarity_weights(
         {"a": 0.5001, "b": 0.5000, "c": 0.4999})
     assert weights is None and temperature is None
@@ -115,8 +108,7 @@ def test_money_follows_influence_times_track_shares():
 
 
 def test_missing_rights_become_unattributed_not_redistributed():
-    """A splits sheet that quietly absorbed unknown ownership into the known
-    writers would be lying with clean margins."""
+    """Unknown ownership is reported, never absorbed into the known writers."""
     blended = {"known": 0.7, "unknown": 0.3}
     ranges = {t: (v, v) for t, v in blended.items()}
     rights = {"known": {"writers": [{"name": "Ava", "share_pct": 100}],
@@ -128,10 +120,7 @@ def test_missing_rights_become_unattributed_not_redistributed():
 
 
 def test_party_ranges_never_exceed_the_whole_output():
-    """Per-track maxima are independent envelopes; summed for a writer with
-    shares in every track they can pass 100% — found live at 147.99%, and
-    the schema validator rightly refused the document. Nobody owns more
-    than the whole."""
+    """Summed per-track maxima can pass 100%; nobody owns more than the whole."""
     blended = {"a": 0.6, "b": 0.4}
     ranges = {"a": (0.3, 0.9), "b": (0.2, 0.8)}     # hi sum = 1.7
     rights = {t: {"writers": [{"name": "Solo", "share_pct": 100}],
@@ -143,9 +132,8 @@ def test_party_ranges_never_exceed_the_whole_output():
 
 
 def test_largest_remainder_survives_a_251_track_catalogue():
-    """Naive 4dp rounding drifts past the validator's 0.01 sum tolerance at
-    201+ tracks (found in review at 251). Largest-remainder sums to exactly
-    100 at any catalogue size."""
+    """Naive 4dp rounding drifts past the validator's sum tolerance at 201+
+    tracks; largest-remainder sums to exactly 100 at any size."""
     shares = {f"t{i}": 20 / 5022 for i in range(250)}
     shares["big"] = 22 / 5022
     total = sum(shares.values())
@@ -156,11 +144,8 @@ def test_largest_remainder_survives_a_251_track_catalogue():
 
 
 def test_a_torn_bundle_is_refused_not_misattributed():
-    """Index rows and the embedding array are two separately copied files;
-    when their counts disagree the store is torn, and zip-truncation would
-    silently drop tracks from similarity (found in review: a 3-track index
-    over a 2-row array crashed on one shape and mislabeled itself as
-    'uninformative' on another)."""
+    """When the index and the embedding array disagree the store is torn;
+    zip-truncation would silently drop tracks from similarity."""
     from khaos_attribution.estimator import build_estimate
     with pytest.raises(ValueError, match="torn"):
         build_estimate(
@@ -177,11 +162,8 @@ def test_a_torn_bundle_is_refused_not_misattributed():
 
 
 def test_ranges_are_temperature_sensitivity_not_ingredient_spread():
-    """The range answers "how much would this share move if calibration says
-    we sharpen twice too much, or half enough" — it must contain the point
-    (factor 1.0 is in the sweep) and be narrower than the old raw
-    exposure-to-similarity interval that read as wider uncertainty than the
-    method actually has."""
+    """The range must contain the point (factor 1.0 is in the sweep) and be
+    narrower than the raw exposure-to-similarity interval."""
     exposure = {"a": 0.8, "b": 0.2}
     scores = {"a": 0.30, "b": 0.60}
     weights, temperature = blend.similarity_weights(scores)
@@ -199,11 +181,8 @@ def test_ranges_are_temperature_sensitivity_not_ingredient_spread():
 
 
 def test_the_temperature_sweep_is_what_makes_the_range_a_range():
-    """TEMPERATURE_SWEEP is the width of every uncertainty range an artist
-    sees, and until 2026-09-11 the suite passed with the sweep collapsed to
-    (1.0,) — a document would have shown [x, x] as its interval and no test
-    minded. The default must reach both sides of 1.0 and must move the
-    shares; a single-factor sweep must give the degenerate interval."""
+    """The default sweep must reach both sides of 1.0 and move the shares;
+    a single-factor sweep must give the degenerate interval."""
     assert min(blend.TEMPERATURE_SWEEP) < 1.0 < max(blend.TEMPERATURE_SWEEP)
     exposure = {"a": 0.5, "b": 0.3, "c": 0.2}
     scores = {"a": 0.30, "b": 0.60, "c": 0.45}

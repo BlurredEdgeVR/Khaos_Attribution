@@ -1,36 +1,12 @@
-"""The seal and the marks row of the Guild of Fine Tuners — hallmarks for
-a registered adapter.
+"""The seal and the marks row of the Guild of Fine Tuners (see SPEC.md).
 
-The Guild is the members' body; the Khaos Foundation holds the Register;
-its trustees are the Guardians. (The Foundation's name is subject to a
-trade mark question: it appears in human-readable text only, never in a
-filename, module name or public identifier.)
-
-Two assets from one set of punch primitives:
-
-``render_seal(number, artist_mark, standard_version, date_letter)``
-    Ceremonial. A circular stamp: the ring inscription ``REGISTER No:``
-    followed by the register number, the full interlaced Khaos star
-    presiding, and three hand-struck punches beneath it — artist,
-    standard, year. Certificates, the Register page header, anything
-    physical. The marks say who examined the model; the ring carries only
-    the number that resolves to the Register entry.
-``render_marks_row(artist_mark, standard_version, date_letter)``
-    Small and functional. Four punches in a line — artist, standard, Guild,
-    year — no ring, no field. Model cards, model pages, cover art. The
-    Guild punch carries a REDUCED solid star: the interlaced artwork does
-    not survive reduction and is never drawn small (SPEC.md).
-
-Pure geometry, deterministic, dependency-free. Every character is a vector
-path from ``glyphs.json`` (built once from Red Hat Display Bold by
-``tools/build_glyphs.py``); the runtime has no font, no ``<text>``, no
-``<textPath>``, no ``@font-face`` and nothing to fetch. Text on a curved
-path fails silently across SVG renderers and has cost this project time.
-
-``seal_for_provenance`` / ``marks_row_for_provenance`` draw for a VERIFIED
-provenance document and refuse — raising ``SealRefused`` — unless
-``embedded_agrees_with_sidecar`` is literally ``True``. The values are read
-from the record, never made here.
+``render_seal`` is the ceremonial stamp: ring inscription ``REGISTER No:``
+plus the register number, the interlaced star, and three punches (artist,
+standard, year). ``render_marks_row`` is four punches in a line (artist,
+standard, Guild, year) with a reduced solid star — the interlaced artwork
+is never drawn small. Every character is a vector path from ``glyphs.json``;
+no font, ``<text>`` or ``<textPath>`` is used. The ``*_for_provenance``
+wrappers refuse unless ``embedded_agrees_with_sidecar`` is literally True.
 """
 
 from __future__ import annotations
@@ -54,20 +30,17 @@ FIELD_R = 396
 OUTER_RULE_R = 352
 INNER_RULE_R = 276
 RULE_WIDTH = 7
-# The ring. 290 is the APPROVED baseline radius: 298.6 would centre the caps
-# optically between the band rules at 276 and 352, and it was tried and
+# 290 is the approved baseline radius; the optically centred 298.6 was
 # rejected — do not "correct" it (SPEC.md).
 BASELINE_R = 290.0
 TYPE_SIZE = 44.0
 TRACKING = 9.0
-# The inscription's fixed label, set inside the renderer, never passed in.
-# Exactly this casing: capital N, lowercase o, colon, one space.
+# Fixed ring label, exactly this casing; never passed in.
 RING_PREFIX = "REGISTER No: "
 INK = "#0b0f0e"
 PAPER = "#ffffff"
-# The two approved colourways (assets/guild-seal.svg, assets/guild-seal-light.svg):
-# "ink" is white artwork on an ink disc, for light artwork; "paper" is ink
-# artwork on a paper disc, for dark artwork.
+# The two approved colourways: "ink" is white on an ink disc, "paper" is ink
+# on a paper disc.
 COLOURWAYS = {"ink": {"field": "#0b0f0e", "art": "#ffffff"},
               "paper": {"field": "#f4f1ea", "art": "#0b0f0e"}}
 STAR_TRANSFORM = "translate(269.00,167.00) scale(0.42429)"    # 262 wide, centred (400, 298)
@@ -111,8 +84,8 @@ JITTER_ROTATION = (-3.0, 3.0)
 JITTER_DX = (-1.0, 1.0)
 JITTER_DY = (-2.0, 4.0)
 
-# What a caller may pass: uppercase only. The table also holds the one
-# lowercase glyph the ring label needs, which no input may use.
+# What a caller may pass; the glyph table also holds the lowercase "o" the
+# ring label needs, which no input may use.
 CHARSET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789:.-/ "
 DATE_LETTER_EPOCH = 2026      # the year whose letter is A; see provenance_values
 
@@ -174,17 +147,11 @@ def _text(value, what: str, *, min_len: int = 1, max_len: int | None = None) -> 
 # ── the ring type ───────────────────────────────────────────────────────────
 
 def layout(inscription: str) -> list[dict]:
-    """Where each ring glyph goes: the exact arc layout from SPEC.md.
+    """Where each ring glyph goes: the arc layout from SPEC.md.
 
-    ``inscription`` is the whole ring string — ``RING_PREFIX`` plus the
-    number, exactly as given. Nothing here derives, pads or reformats the
-    number: it is an opaque register number issued at admission, and the
-    renderer only sets it.
-
-    Advances are px (glyph advance × type size / 1000). The run's total arc
-    length, tracking included, becomes an angle at the baseline radius and
-    is centred on the top; each glyph sits at the middle of its own advance
-    and is rotated to the tangent, facing outward.
+    ``inscription`` is the whole ring string, set exactly as given. The run's
+    arc length, tracking included, is centred on the top of the baseline
+    circle; each glyph sits mid-advance, rotated to the tangent.
     """
     glyphs = _glyphs()
     scale = TYPE_SIZE / 1000.0
@@ -218,12 +185,10 @@ def _ring_type(number: str) -> str:
 # ── punch primitives (shared by both assets) ────────────────────────────────
 
 def punch_text_layout(text: str, size: float, baseline: float) -> tuple[float, list[dict]]:
-    """Straight type centred on the punch's centre line.
+    """Straight type centred on the punch; returns (type size used, glyphs).
 
-    Returns (type size actually used, glyphs). The size is the MAXIMUM: a
-    run wider than ``PUNCH_TEXT_MAX_W`` is set smaller so it fits the punch
-    — a hallmark is cut to its die, and a version string is not allowed to
-    escape the shield.
+    ``size`` is a maximum: a run wider than ``PUNCH_TEXT_MAX_W`` is set
+    smaller so it fits the punch.
     """
     glyphs = _glyphs()
     units = sum(glyphs[c]["advance"] for c in text)
@@ -312,20 +277,12 @@ def render_seal(number: str, artist_mark: str, standard_version: str, date_lette
                 jitter: Sequence[tuple[float, float, float]] | None = None) -> str:
     """The ceremonial seal as SVG source.
 
-    ``colourway`` is ``"ink"`` (white on an ink disc, the default and the
-    golden) or ``"paper"`` (ink on a paper disc, for dark artwork) — the two
-    approved references under ``assets/``.
-
-    ``size`` is the rendered width and height in px (the 800-unit canvas
-    scaled by size / 800). ``rough`` enables the optional turbulence filter
-    — off by default; several renderers ignore filters, so the clean drawing
-    is canonical and the filter never carries meaning. ``jitter`` overrides
-    the three punches' (rotation, dx, dy); the provenance wrapper derives it
-    from the record when asked to.
+    ``size`` is the rendered width and height in px. ``rough`` enables the
+    optional turbulence filter; the clean drawing is canonical and the filter
+    never carries meaning. ``jitter`` overrides the punches' (rotation, dx, dy).
     """
-    # The number is opaque: accepted as given (no digit count, no format —
-    # what the watermark payload can carry is decided upstream, SPEC.md),
-    # refused only for a character the table cannot set.
+    # The number is opaque: accepted as given, refused only for a character
+    # the table cannot set.
     number = _text(number, "register number")
     artist_mark, standard_version, date_letter = _validate_values(artist_mark, standard_version, date_letter)
     if not isinstance(size, int) or size <= 0:
@@ -414,21 +371,13 @@ _INITIALS_SPLIT = re.compile(r"[\s\-_/.]+")
 def provenance_values(document: dict, *, number_key: str = "watermark_id") -> dict:
     """The four values a mark is struck with, read from a verified document.
 
-    Refuses unless ``embedded_agrees_with_sidecar`` is literally ``True`` —
-    the mark asserts the check passed. Then, from the record:
-
-    - ``number``: ``record[number_key]`` as given — an opaque register number
-      issued at admission, never derived, padded or reformatted here;
-    - ``artist_mark``: ``record["artist_mark"]`` when the record carries one,
-      else the initials of ``artist_name`` (two or three A–Z/0–9 characters);
-    - ``standard_version``: ``record["standard_version"]`` when present, else
-      the record's ``schema_version`` as major.minor — the attribution
-      standard this record conforms to, as displayed;
-    - ``date_letter``: ``record["date_letter"]`` when present, else the year
-      letter of ``timestamp`` (``DATE_LETTER_EPOCH`` → A, then B, C…).
-
-    Nothing is generated or assigned here: every value is a reading of the
-    record, and the reading is the same for the same record.
+    Refuses unless ``embedded_agrees_with_sidecar`` is literally ``True``.
+    ``number`` is ``record[number_key]`` as given, never reformatted;
+    ``artist_mark`` is ``record["artist_mark"]`` or the initials of
+    ``artist_name``; ``standard_version`` is ``record["standard_version"]``
+    or ``schema_version`` as major.minor; ``date_letter`` is
+    ``record["date_letter"]`` or the year letter of ``timestamp``
+    (``DATE_LETTER_EPOCH`` → A). Nothing is generated here.
     """
     if not isinstance(document, dict):
         raise SealRefused("a provenance document is a JSON object")

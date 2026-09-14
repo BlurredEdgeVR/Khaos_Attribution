@@ -29,8 +29,7 @@ def test_the_same_input_is_the_same_bytes():
 
 
 def test_the_goldens_have_not_moved():
-    """Committed references. A geometry change is a deliberate act: re-render
-    both, look at them, commit them with the reason."""
+    """A geometry change is deliberate: re-render both, look, commit with the reason."""
     assert render_seal(*ARGS) == GOLDEN_SEAL.read_text(encoding="utf-8")
     assert render_marks_row("CG", "1.0", "A") == GOLDEN_MARKS.read_text(encoding="utf-8")
 
@@ -47,8 +46,7 @@ def test_no_text_element_font_or_fetch_in_either_output():
 
 
 def test_rendering_needs_no_font_and_no_environment():
-    """A fresh interpreter, isolated (-I), an empty environment: no HOME, no
-    fontconfig, no PATH. The renderer reads only its own package data."""
+    """An isolated interpreter with an empty environment renders from package data alone."""
     code = ("import sys; sys.path.insert(0, %r); import khaos_attribution.seal as s; "
             "a = s.render_seal('123456', 'CG', '1.0', 'A'); b = s.render_marks_row('CG', '1.0', 'A'); "
             "assert 'fontTools' not in sys.modules; sys.stdout.write('%%d %%d' %% (len(a), len(b)))") % str(ROOT / "src")
@@ -97,8 +95,7 @@ def test_artist_marks_of_two_and_three_characters_stay_centred_in_the_punch(mark
     assert abs((x0 + x1) / 2 - seal.PUNCH_CX) < 2.5, "not centred on the punch"
     assert 10 + 9 < x0 and x1 < 130 - 9, "runs into the canted rect's stroke"
     assert 10 < y0 and y1 < 160
-    # Ordinary marks set at full size; the widest three letters in the face
-    # ("WWW") are cut smaller to the die rather than allowed to escape it.
+    # The widest three letters ("WWW") are cut smaller to the die.
     assert used == 44.0 if mark != "WWW" else used < 44.0
 
 
@@ -122,9 +119,8 @@ def test_the_date_letter_sits_inside_the_cartouche():
 
 @pytest.mark.parametrize("number", ["7", "123456", "2026-000123", "A B C 1 2"])
 def test_the_ring_run_is_centred_on_the_top_and_stays_inside_the_band(number):
-    """With the label in front, an eleven-character number still sits within
-    the top half; longer ones run further round and are accepted anyway —
-    the number's length is not this module's to limit."""
+    """An eleven-character number still sits within the top half; the
+    number's length is not this module's to limit."""
     glyphs = seal.layout(seal.RING_PREFIX + number)
     r = seal.BASELINE_R
     first = glyphs[0]["theta"] - glyphs[0]["advance_px"] / 2 / r
@@ -223,13 +219,10 @@ def test_the_licence_travels_with_the_table_and_the_font_does_not():
     assert not list((ROOT / "src").rglob("*.ttf")) and not list((ROOT / "tools").rglob("*.ttf"))
 
 
-# ── amendment 2: the inscription, the opaque number, the naming ─────────────
+# ── the inscription, the opaque number, the naming ──────────────────────────
 
 def test_the_ring_carries_the_fixed_label_and_the_number_exactly_as_given():
-    """The label is set inside the renderer; the number is opaque — never
-    computed, padded, cased or reformatted, only set. A leading zero stays;
-    a nine-character number is as welcome as a six; nothing chooses a digit
-    count here (the watermark payload's capacity is an upstream question)."""
+    """The number is opaque: never computed, padded, cased or reformatted."""
     assert seal.RING_PREFIX == "REGISTER No: "
     assert seal.TYPE_SIZE == 44.0 and seal.TRACKING == 9.0 and seal.BASELINE_R == 290.0   # 298.6 was rejected
     for number in ("123456", "000042", "7", "2026-000123", "A/9"):

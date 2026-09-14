@@ -75,9 +75,8 @@ def test_fresh_generation_lineage_defaults_pass():
     validate_provenance_record(record)
 
 
-# A literal record exactly as writers produced it under schema package v0.1.0:
-# no generation_mode, no source_generation_id, no watermark_id keys.
-# Frozen deliberately — do not "modernise" it; it guards backwards compatibility.
+# A literal v0.1.0 record: no lineage or watermark keys. Frozen deliberately;
+# it guards backwards compatibility.
 V010_PROVENANCE_RECORD = {
     "schema_version": "1.0.0",
     "artist_name": "Ava Example",
@@ -142,16 +141,14 @@ def test_exported_constants_match_schema_const():
         PROVENANCE_SCHEMA_VERSION
         == provenance_schema["properties"]["schema_version"]["const"]
     )
-    # The card schema accepts BOTH versions mid-migration (watermarking
-    # v2); the exported constant is what writers stamp — the newest.
+    # The card schema accepts both versions; writers stamp the newest.
     accepted = card_schema["properties"]["schema_version"]["enum"]
     assert MODEL_CARD_SCHEMA_VERSION == max(accepted)
     assert "1.0.0" in accepted
 
 
 def test_catalogue_vocal_flag_optional_and_boolean():
-    # 0.4.1: 'vocal' is optional (older cards predate it) but must be a
-    # boolean when present — no third state sneaks into the contract.
+    # 'vocal' is optional but must be a boolean when present.
     card = copy.deepcopy(GOOD_MODEL_CARD)
     card["training_catalogue"] = [
         {"title": "Sung one", "duration": 201.5, "vocal": True},
@@ -182,8 +179,7 @@ def test_tombstone_validates_and_refuses_garbage():
 
 
 def test_model_card_accepts_watermark_id_and_both_versions():
-    # 1.1.0 adds the optional field; 1.0.0 cards (no field) must keep
-    # validating so cards sync between machines mid-migration.
+    # 1.1.0 adds the optional field; 1.0.0 cards must keep validating.
     base = copy.deepcopy(GOOD_MODEL_CARD)
     validate_model_card(base)                       # 1.0.0, no watermark_id
     card = copy.deepcopy(GOOD_MODEL_CARD)

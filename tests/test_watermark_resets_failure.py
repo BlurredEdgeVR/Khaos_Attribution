@@ -1,6 +1,4 @@
-"""reset_history's unreadable-package-data fallback — the exact 0.16.0
-regression its comment cites (package data not shipped → every freed ID
-quietly read as "unknown"). Pinned so it cannot silently recur."""
+"""reset_history degrades to an empty, logged history when package data is unreadable."""
 
 import khaos_attribution.watermark as wm
 

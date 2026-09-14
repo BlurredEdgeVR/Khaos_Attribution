@@ -1,8 +1,5 @@
-"""Three version numbers disagreed on 2026-09-11 (pyproject 0.18.0, the
-fallback __version__ 0.17.0, the newest tag v0.17.0), and `requires-python
-= ">=3.9"` was false: `X | None` in an annotation raises at import on 3.9
-unless the module defers annotations. Both are pinned here.
-"""
+"""The fallback __version__ matches pyproject, and every module with
+`X | None` annotations defers them so requires-python >= 3.9 holds."""
 from __future__ import annotations
 
 import ast
@@ -21,15 +18,12 @@ def _pyproject_version() -> str:
 
 
 def test_the_fallback_version_is_the_pyproject_version():
-    """The fallback is what a checkout reports; a stale one is a lie the
-    rooms would pin."""
+    """The fallback is what a checkout reports."""
     source = (PACKAGE / "__init__.py").read_text(encoding="utf-8")
     fallback = re.search(r'__version__ = "([^"]+)"', source).group(1)
     assert fallback == _pyproject_version()
-    # The installed metadata is whatever `pip install -e` last recorded; a
-    # stale editable install reported 0.13.2 against a 0.19.0 checkout on
-    # 2026-09-11. That is an install to refresh, not a source to pin, so the
-    # runtime value is only required to be a version string.
+    # The installed metadata may be a stale editable install, so the runtime
+    # value is only required to be a version string.
     assert re.fullmatch(r"\d+\.\d+\.\d+", khaos_attribution.__version__)
 
 
@@ -52,8 +46,7 @@ def _uses_pep604_union(tree: ast.AST) -> bool:
 
 def test_every_module_with_union_annotations_defers_them():
     """`int | None` is evaluated at definition time on 3.9 unless the module
-    starts with `from __future__ import annotations` — the claim in
-    pyproject's requires-python depends on it."""
+    defers annotations."""
     offenders = []
     for path in sorted(PACKAGE.glob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"))

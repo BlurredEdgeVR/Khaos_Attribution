@@ -1,12 +1,4 @@
-"""The estimate carries its own reliability, and can carry its aspects.
-
-From the 2026-09-10 prior-art review. Two published findings land on this
-estimator: similarity correlates near zero with causal influence (Deng et
-al.), and a single scalar per track cannot support copyright analysis
-(Aria). Neither is fixed by arithmetic. Both are answered by the document
-saying more about itself — how far its signal carried, and which musical
-channel a resemblance ran through.
-"""
+"""The estimate carries its own reliability, and can carry its aspects."""
 from __future__ import annotations
 
 import numpy as np
@@ -31,8 +23,7 @@ def _estimate(**over):
 
 
 def test_without_earlier_outputs_the_reliability_is_unknown_and_says_why():
-    """A first generation has no evidence about the signal across outputs.
-    Reporting 'informative' there would be inventing a finding."""
+    """A first generation has no evidence about the signal across outputs."""
     rel = _estimate()["method"]["reliability"]
     assert rel["verdict"] == "unknown" and "no earlier outputs" in rel["why"]
 
@@ -62,10 +53,8 @@ def test_earlier_outputs_over_a_different_catalogue_are_unknown_not_blended():
 
 
 def test_partial_columns_are_intersected_never_zero_filled():
-    """Zero-filling a track a column does not carry invents a cosine, and
-    the invented zeros manufacture the very variation the readings look for:
-    ten identical rankings stored as different subsets came back
-    'informative' instead of 'collapsed'."""
+    """Zero-filling a missing track would manufacture the very variation the
+    readings look for."""
     same = {"t1": 0.81, "t2": 0.42, "t3": 0.63}
     partial = {}
     for i in range(10):
@@ -79,8 +68,8 @@ def test_partial_columns_are_intersected_never_zero_filled():
 
 
 def test_a_collapsed_verdict_reaches_the_caveats_not_just_the_method_block():
-    """Every surface in both rooms renders `caveats`; none renders `method`
-    beyond two fields, so a verdict left there would be invisible."""
+    """Every surface renders `caveats`; a verdict left in `method` alone
+    would be invisible."""
     doc = _estimate(recent_similarity={f"g{i}": {"t1": 0.81, "t2": 0.42, "t3": 0.63}
                                        for i in range(10)})
     assert doc["method"]["reliability"]["verdict"] == "collapsed"
@@ -106,9 +95,7 @@ def test_the_aspects_block_appears_only_when_the_caller_supplies_descriptors():
 
 
 def test_the_document_still_validates_with_both_blocks_present():
-    """They ride under `method`, which the schema leaves open — the top
-    level is closed and its version is a const, so a new key there would
-    invalidate every estimate ever written."""
+    """Both ride under `method`, which the schema leaves open."""
     doc = _estimate(
         recent_similarity={f"g{i}": {"t1": 0.8, "t2": 0.4, "t3": 0.6} for i in range(9)},
         output_metadata={"bpm": 120, "key": {"tonic": "A", "mode": "minor"}},
@@ -119,8 +106,7 @@ def test_the_document_still_validates_with_both_blocks_present():
 
 
 def test_informative_evidence_does_not_move_a_share():
-    """Evidence that the signal varies across outputs is a reading, not an
-    ingredient: it must leave every share where the blend put it."""
+    """An informative reading is not an ingredient; every share stays put."""
     rng = np.random.default_rng(3)
     recent = {f"g{i}": {t: float(v) for t, v in zip(("t1", "t2", "t3"), rng.normal(size=3))}
               for i in range(12)}
@@ -132,10 +118,7 @@ def test_informative_evidence_does_not_move_a_share():
 
 
 def test_a_collapsed_signal_changes_the_number_not_just_the_footnote():
-    """The 2026-09-11 release review: a signal the diagnostics call collapsed
-    still showed a 69% blended share with a caveat appended. A signal that
-    returns the same tracks whatever was generated is not evidence about
-    this output, so the honest share is the exposure prior — and the
+    """A collapsed signal makes the share the exposure prior, and the
     document must say resemblance was not used."""
     plain = _estimate()
     collapsed = _estimate(recent_similarity={f"g{i}": {"t1": 0.8, "t2": 0.4, "t3": 0.6}
@@ -143,8 +126,7 @@ def test_a_collapsed_signal_changes_the_number_not_just_the_footnote():
     assert collapsed["method"]["reliability"]["verdict"] == "collapsed"
     assert plain["influence"] != collapsed["influence"], "the share did not move"
     for entry in collapsed["influence"]:
-        # One 4-dp step is the largest-remainder rounding that makes the
-        # shares sum to exactly 100; anything more is a moved share.
+        # One 4-dp step is largest-remainder rounding; anything more is a moved share.
         assert abs(entry["blended_share_pct"] - entry["exposure_share_pct"]) <= 0.0001
         assert entry["similarity_share_pct"] is None
         lo, hi = entry["share_range_pct"]
@@ -155,8 +137,7 @@ def test_a_collapsed_signal_changes_the_number_not_just_the_footnote():
 
 
 def test_each_document_stores_its_own_similarity_column():
-    """The one input the collapse readings need and nothing used to store:
-    without it every estimate ever written read `unknown`."""
+    """The one input the collapse readings need across outputs."""
     doc = _estimate()
     col = doc["method"]["similarity_scores"]
     assert set(col) == {"t1", "t2", "t3"}
@@ -164,9 +145,8 @@ def test_each_document_stores_its_own_similarity_column():
 
 
 def test_recent_columns_are_read_back_from_earlier_documents():
-    """The producer's whole job is to hand back its earlier documents; the
-    contract picks the right adapter, skips the output being estimated and
-    documents without the block, and keeps the newest `limit`."""
+    """The contract picks the right adapter, skips the output being estimated
+    and documents without the block, and keeps the newest `limit`."""
     from khaos_attribution.estimator import recent_similarity_from_documents
     docs = []
     for i in range(12):

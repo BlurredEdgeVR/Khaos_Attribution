@@ -1,29 +1,13 @@
-"""Word timings for a sung piece — forced alignment of KNOWN lyrics.
+"""Word timings for a sung piece — forced alignment of known lyrics.
 
-Shared by the Workshop (auditions) and the Listening Space (outputs): both
-show a piece's words as the selection surface for a repaint and both must
-place them the same way. The contract here is the document shape:
-
-    {"schema_version": "1.0.0", "aligner": {...}, "sample_rate", "duration",
-     "lyrics": <text>, "words": [{"word", "char_start", "char_end",
-                                  "start", "end", "score", "placed"}]}
-
-``char_start``/``char_end`` index the ORIGINAL lyrics text; a client splices
-an edit by character span (``splice_words``) so line breaks and structure
-tags outside the span are untouched, and the engine is asked to sing the
-full edited text.
-
-Mechanics: torchaudio's CTC ``forced_align`` against a wav2vec2 emission
-(English characters A–Z and apostrophe; other scripts fold to their base
-letters or are interpolated). Audio is decoded with soundfile — torchaudio's
-own loader needs FFmpeg via torchcodec, which the Macs lack. Emissions are
-computed in 30 s chunks (attention is quadratic in time). One model per
-process. Words the aligner cannot place are interpolated between their
-neighbours with score 0 and ``placed: False`` — shown approximate, never
-precise.
-
-Heavy imports stay inside functions: importing this module costs nothing,
-and ``available()`` is memoised.
+Document: ``{"schema_version": "1.0.0", "aligner": {...}, "sample_rate",
+"duration", "lyrics", "words": [{"word", "char_start", "char_end", "start",
+"end", "score", "placed"}]}``. ``char_start``/``char_end`` index the original
+lyrics text so an edit is spliced by character span (``splice_words``).
+Words the aligner cannot place are interpolated between their neighbours
+with score 0 and ``placed: False``. Alignment is torchaudio's CTC
+``forced_align`` over wav2vec2 emissions computed in 30 s chunks; heavy
+imports stay inside functions.
 """
 
 from __future__ import annotations
@@ -61,9 +45,8 @@ def available() -> bool:
 
 
 def tokenize_lyrics(text: str) -> list[dict]:
-    """Words with character offsets, skipping structure-tag lines. Pure and
-    deterministic: every client and the aligner agree on word indices
-    because all derive them from this one function."""
+    """Words with character offsets, skipping structure-tag lines; every
+    client and the aligner derive word indices from this one function."""
     words: list[dict] = []
     pos = 0
     for line in text.splitlines(keepends=True):
@@ -139,11 +122,9 @@ def align_file(audio_path: Path | str, lyrics: str) -> dict:
         sr = model_sr
     total_seconds = waveform.shape[1] / sr
 
-    # Targets: each word's alignable characters, words separated by the
-    # model's boundary token "|". Unalignable words contribute no characters
-    # and are interpolated afterwards. ``spans`` indexes into ``targets``
-    # and merge_tokens returns one span per target token ("|" included),
-    # so the two stay aligned.
+    # Targets: each word's alignable characters, separated by the boundary
+    # token "|"; merge_tokens returns one span per target token, so ``spans``
+    # indexes into it directly.
     targets: list[int] = []
     spans: list[tuple[int, int] | None] = []
     for w in words:

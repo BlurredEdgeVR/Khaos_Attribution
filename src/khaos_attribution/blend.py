@@ -1,45 +1,13 @@
-"""The blend: exposure prior × calibrated acoustic similarity, with ranges.
+"""The blend: exposure prior × acoustic similarity, with ranges.
 
-Pure functions over plain data — no file I/O, no model. This lives in the
-CONTRACT package because both the Workshop and the Listening Space compute
-estimates: two apps deriving different numbers from the same data would be
-a scandal, so there is exactly one implementation, versioned with the
-schemas it feeds.
-
-The method, in full (this docstring is the reference the estimate's
-`method` block points at):
-
-1. **Exposure prior.** Each training track's share of the adapter's
-   training segments. Deterministic, auditable, and the defensible floor:
-   absent evidence of differential influence, influence follows exposure.
-
-2. **Similarity likelihood.** Cosine similarity of the output's CLAP
-   embedding against each track's segment embeddings (mean of the top-k
-   segments, so a track's one lucky segment does not speak for it and a
-   long track is not diluted by its quiet passages). Scores become weights
-   through a softmax whose temperature is the score spread — and when that
-   spread is below SPREAD_FLOOR the whole signal is declared uninformative
-   and the estimator falls back to the exposure prior alone. Same-genre
-   catalogues cluster tightly in embedding space; pretending to read
-   track-level signal out of a 0.003 spread would be astrology.
-
-3. **Blend.** Posterior ∝ exposure × similarity weight, renormalised.
-
-4. **Ranges.** Per track: [min, max] of the blend recomputed with the
-   softmax temperature halved and doubled. The temperature is the one
-   uncalibrated parameter (the leave-one-track-out study is its planned
-   calibration), so the interval answers "how much would this share move
-   if the calibration says we are sharpening twice too much, or half
-   enough?" — parameter sensitivity, not ingredient spread. The earlier
-   interval spanned raw exposure to raw similarity, two things that were
-   never candidate answers, and read as wider uncertainty than the
-   method actually has.
-
-5. **Money.** A party's share of the output = Σ over tracks
-   (track influence × party's share of that track). Tracks without rights
-   records contribute to `unattributed_pct`, reported and never silently
-   renormalised away — a splits sheet that quietly absorbed unknown
-   ownership would be lying with clean margins.
+Pure functions over plain data; the one implementation both apps use. The
+method the estimate's `method` block points at: (1) exposure prior — each
+track's share of training segments; (2) similarity — top-k mean cosine per
+track, softmaxed at a temperature equal to the score spread, or declared
+uninformative below SPREAD_FLOOR; (3) posterior ∝ exposure × similarity;
+(4) ranges — the blend with the temperature halved and doubled; (5) money —
+Σ track influence × party share, with unattributed influence reported and
+never renormalised away.
 """
 
 from __future__ import annotations
@@ -49,28 +17,17 @@ import math
 import numpy as np
 
 ESTIMATOR_VERSION = "0.5.0"
-# 0.5.0 (2026-09-11): a
-# collapsed reliability verdict now falls back to the exposure prior instead
-# of footnoting the blended share; `method.similarity_scores` stores the raw
-# per-track cosines so the next estimate can judge the signal across outputs.
-# 0.4.0: the method block gained reliability and (when the caller supplies
-# descriptors) aspects. The version moves because the DOCUMENT moved: two
-# estimates both stamped the same version could otherwise differ in what
-# they carry or how a collapsed signal was handled.
-# exposure_basis moved to a per-document string naming the data source
-# ("live Workshop store" / "bundled at artist import") — see estimator.py.
+# The version moves whenever the document's contents or the handling of a
+# collapsed signal change, so two estimates stamped alike are alike.
 TOP_K = 3            # segments per track that speak for it
 SPREAD_FLOOR = 0.005  # cosine std-dev below which similarity is noise
 
 
 def largest_remainder_pcts(shares: dict[str, float]) -> dict[str, float]:
-    """Fractions → percentages at 4dp that sum to EXACTLY 100.
+    """Fractions → percentages at 4dp that sum to exactly 100.
 
-    Naive per-entry rounding drifts by up to N×5e-5, which crosses the
-    validator's 0.01 sum tolerance at 201 tracks — a hard catalogue-size
-    ceiling found in review. Largest-remainder assigns the rounding residue
-    to the entries that lost the most to truncation, so the sum is exact at
-    any N and no entry moves by more than one 4dp step.
+    Naive per-entry rounding drifts past the validator's sum tolerance at
+    around 200 tracks; largest-remainder keeps the sum exact at any N.
     """
     scaled = {t: v * 100 for t, v in shares.items()}
     floored = {t: math.floor(v * 10_000) / 10_000 for t, v in scaled.items()}
@@ -139,9 +96,7 @@ def similarity_weights(scores: dict[str, float]
     return softmax_weights(scores, temperature), temperature
 
 
-# The DEFAULT sweep, used when no catalogue calibration exists: a factor-2
-# robustness band by convention. A leave-one-track-out study replaces it
-# with a measured band per adapter.
+# The default factor-2 robustness band, used when no catalogue calibration exists.
 TEMPERATURE_SWEEP = (0.5, 1.0, 2.0)
 
 
@@ -215,11 +170,8 @@ def money_splits(blended: dict[str, float],
             _accumulate(masters, m["name"], m["share_pct"], share, lo, hi)
 
     def _pool(pool: dict) -> list[dict]:
-        # The hi bound sums per-track maxima, which are INDEPENDENT method
-        # envelopes — for a party with shares in every track they can sum
-        # past 100%, a claim nobody can make about one output (found live:
-        # a three-track writer hit 147.99% and the schema validator rightly
-        # refused the document). Nobody owns more than the whole; cap it.
+        # The hi bound sums independent per-track maxima and can pass 100%
+        # for a party with shares in every track; nobody owns more than the whole.
         return [{"name": name,
                  "share_pct": round(e["pct"] * 100, 4),
                  "share_range_pct": [round(min(e["lo"], 1.0) * 100, 4),
