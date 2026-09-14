@@ -1,38 +1,12 @@
-"""Stage 6 watermarking contract, shared by every Khaos issuer.
+"""Watermarking contract shared by every Khaos issuer.
 
-This module is the single source for how a watermark_id is built and
-which issuer may allocate which IDs. The audio machinery (AudioSeal)
-is imported lazily so the schema package stays dependency-light — the
-codec and ranges work everywhere; embed/detect need the heavy extras
-(torch + torchaudio + audioseal) that generation machines already have.
-
-Design decisions (carried over from the Platform implementation where
-they were established — see that repo's git history for the evidence):
-
-1. AudioSeal 16-bit models (facebook/audioseal, MIT). The provenance
-   schema's watermark_id range (0-65535) is exactly AudioSeal's 16-bit
-   message payload — the ID embedded in the audio IS the watermark_id
-   in the record, no separate mapping table to drift.
-
-2. The 16 bits carry an extended-Hamming (16,11) SECDED codeword, not
-   a raw ID. Measured behaviour: AudioSeal's detector occasionally
-   flips a single payload bit even at detection probability 1.0.
-   SECDED corrects any single-bit error and refuses (rather than
-   mis-attributes) double errors. Cost: 2048 IDs instead of 65536.
-
-3. The 2048-payload space is partitioned by issuer so two registries
-   can never hand out colliding IDs:
-       platform  payloads    0-1023   (Listening Space outputs)
-       app       payloads 1024-2047   (Workshop test renders)
-   A decoded codeword's issuer is recoverable via watermark_issuer().
-
-4. Models are 16 kHz-native; outputs are 44.1/48 kHz. The watermark
-   delta is computed at 16 kHz and resampled onto the untouched
-   original — the music itself is never resampled.
-
-5. NO_TORCH_COMPILE is set before AudioSeal runs: its vendored moshi
-   wrapper calls torch.compile, whose C++ codegen fails on macOS
-   clang. Eager mode is more than fast enough.
+The watermark_id (0-65535) is AudioSeal's 16-bit message payload, carrying an
+extended-Hamming (16,11) SECDED codeword: single-bit detector errors are
+corrected, double errors refused. The 2048-payload space is partitioned by
+issuer (platform 0-1023, app 1024-2047) and, for run IDs, by machine band.
+The watermark delta is computed at 16 kHz and resampled onto the untouched
+original. AudioSeal is imported lazily so the codec and ranges work without
+the audio extras.
 """
 
 from __future__ import annotations
@@ -47,11 +21,8 @@ os.environ.setdefault("NO_TORCH_COMPILE", "1")
 log = logging.getLogger("khaos_attribution.watermark")
 
 # ---- extended Hamming (16,11) SECDED codec ----
-#
-# Bit layout follows the classic scheme: positions 1..15 hold parity at
-# powers of two (1, 2, 4, 8) and data elsewhere; position 0 is overall
-# parity. Single-bit errors are corrected via the syndrome; a non-zero
-# syndrome with even overall parity means two errors — uncorrectable.
+# Positions 1..15 hold parity at powers of two and data elsewhere; position 0
+# is overall parity.
 
 _DATA_POSITIONS = [3, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15]  # 11 data bits
 _PARITY_POSITIONS = [1, 2, 4, 8]
@@ -115,21 +86,12 @@ def watermark_issuer(codeword: int) -> str | None:
 
 
 # ---- watermarking v2: model-level allocation (docs/watermarking-v2.md) ----
-#
-# One ID per training run, allocated at training completion into the model
-# card. The payload space is partitioned per TRAINING MACHINE (bands), so
-# three machines allocate without coordination; payloads ever issued by the
-# retired per-output scheme are frozen out (legacy_watermark_ids.json) so a
-# decoded ID is owned by at most one thing.
-
-# Artists' machines (2026-09-11, the closed release): each artist's
-# Workshop draws from a band of its OWN, so two artists can never issue the
-# same run ID — allocation only knows the cards on its own disk, and twenty
-# Workshops sharing one 672-payload band reach a 50 % collision chance by
-# about the thirtieth run between them. Twenty slots of 24 payloads are
-# carved from the old threadripper band, which had never issued an ID; the
-# threadripper keeps the 192 above them. Each slot is 24 training runs per
-# artist before it is exhausted, which allocation reports loudly.
+# One ID per training run, allocated into the model card. The payload space is
+# partitioned per training machine so machines allocate without coordination;
+# payloads issued by the retired per-output scheme are frozen out
+# (legacy_watermark_ids.json) so a decoded ID is owned by at most one thing.
+# Each artist's Workshop draws from its own 24-payload band, carved from the
+# old threadripper band; allocation reports exhaustion loudly.
 ARTIST_BAND_START = 1376
 ARTIST_BAND_SIZE = 24
 ARTIST_BANDS = 20
@@ -169,9 +131,9 @@ def legacy_watermark_ids() -> frozenset:
 
 def allocate_model_watermark_id(band: str, used: set[int]) -> int | None:
     """A fresh run codeword from this machine's band, or None when the band
-    is exhausted (the caller must fail LOUDLY — a run may not complete
-    unmarked). `used` is the set of codewords already present in model
-    cards; the frozen legacy payloads are excluded automatically."""
+    is exhausted (the caller must fail loudly — a run may not complete
+    unmarked). `used` is the codewords already in model cards; frozen legacy
+    payloads are excluded automatically."""
     if band not in MACHINE_BANDS:
         raise ValueError(f"Unknown watermark band {band!r} — one of "
                          f"{sorted(MACHINE_BANDS)}")
@@ -196,9 +158,8 @@ def allocate_model_watermark_id(band: str, used: set[int]) -> int | None:
 
 
 def allocate_watermark_id(used: set[int], issuer: str = "platform") -> int | None:
-    """DEPRECATED (watermarking v2): per-output allocation is retired —
-    new audio carries its model's run ID (allocate_model_watermark_id).
-    Kept only so legacy code paths keep working until phase 4 lands."""
+    """DEPRECATED: per-output allocation is retired — new audio carries its
+    model's run ID (allocate_model_watermark_id). Kept for legacy callers."""
     payload_range = PAYLOAD_RANGES[issuer]
     span = len(payload_range)
     for _ in range(64):
@@ -274,15 +235,10 @@ class Watermarker:
     @staticmethod
     def decode_consistent(audio, sample_rate: int, *, window_s: float = 6.0,
                           hop_s: float = 3.0) -> tuple[float, int | None]:
-        """DEPRECATED (measured 2026-08-20, live): windowed agreement does
-        not discriminate. Mid-file windows misdecode even on FULL marked
-        files (so this gate refused every real-length file), while an
-        excerpt's miscorrection is deterministic — its windows agree with
-        each other on the same WRONG codeword. The working discriminator
-        is cross-evidence: a content-fingerprint match to a stored output
-        whose recorded ID confirms or contradicts the decoded payload
-        (docs/watermarking-v2.md §0, second amendment revised). Kept only
-        so pinned consumers keep importing."""
+        """DEPRECATED: windowed agreement does not discriminate excerpts from
+        full files. Use cross-evidence (a fingerprint match whose recorded ID
+        confirms or contradicts the decoded payload) instead. Kept only so
+        pinned consumers keep importing."""
         import numpy as np  # noqa: PLC0415
 
         whole_prob, whole_id, _ = Watermarker.detect_array(audio, sample_rate)
@@ -329,14 +285,11 @@ class Watermarker:
         return float(probability), codeword, corrected
 
 
-# ---------------------------------------------------------------------------
-# Retired model IDs — allocation scans the cards on disk, so removing an
-# artist (Workshop data or a served adapter) would otherwise FREE its
-# codewords for the next run: a new adapter stamped with an ID that kept
-# downloads still carry. Removal retires the IDs into a small record
-# beside the artists directory; allocators read it alongside the cards.
-# Append-only, never pruned — an ID is spent forever.
-# ---------------------------------------------------------------------------
+# ---- retired model IDs ----
+# Allocation scans the cards on disk, so removing an artist would otherwise
+# free its codewords. Removal retires them into a record under ``home`` that
+# allocators read alongside the cards. Append-only, never pruned — an ID is
+# spent forever.
 
 RETIRED_IDS_FILENAME = ".retired_watermark_ids.json"
 
@@ -412,15 +365,10 @@ def retire_watermark_ids(home, entries) -> int:
     return added
 
 
-# ---------------------------------------------------------------------------
-# Resets — the history of "never free an ID", when it was deliberately broken.
-# An ID is spent forever while anything carrying it might exist. On
-# 2026-08-22 the operator deleted every output ever made (nothing exported
-# survived) and freed the residue: the per-output ledger, the frozen legacy
-# list and the retired records. The record below keeps that history so a
-# verification of a freed codeword can say "issued before the reset of …"
-# instead of silently pointing at whatever it is re-issued to later.
-# ---------------------------------------------------------------------------
+# ---- resets ----
+# The record of every deliberate freeing of IDs (package data), so verifying
+# a freed codeword can say "issued before the reset of …" rather than point
+# at whatever it is re-issued to later.
 
 _RESETS = None
 
@@ -435,8 +383,7 @@ def reset_history() -> list[dict]:
             _RESETS = json.loads(files("khaos_attribution")
                                  .joinpath("watermark_resets.json").read_text())
         except (OSError, ValueError) as exc:
-            # A missing record is the 0.16.0 bug (package data not shipped):
-            # every freed ID would quietly read as "unknown". Say so.
+            # Without the record every freed ID would quietly read as "unknown".
             log.warning("watermark_resets.json unreadable (%s) — reset history unavailable", exc)
             _RESETS = []
     import copy  # noqa: PLC0415

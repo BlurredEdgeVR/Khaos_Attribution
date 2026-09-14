@@ -1,22 +1,11 @@
 """Catalogue metadata — the tempo, key and time signature an adapter was
 trained with, and the defaults a generation should start from.
 
-Shared by the Workshop (which holds the per-track metadata the pipeline
-extracted) and the Listening Space (which receives a snapshot of it in
-the artist bundle at import). Both compute the same defaults from the
-same document shape, so a blank tempo or key field means "the artist's
-usual" in both apps — the adapter was conditioned on these values at
-training; "model decides" lets the base model pick from its whole
-distribution instead.
-
-Document (``catalogue_metadata.json``)::
-
-    {"schema_version": "1.0.0", "artist_id": "…",
-     "tracks": [{"track_id", "title", "duration", "bpm", "bpm_confidence",
-                 "octave_resolved", "keyscale", "key_confidence", "timesignature"}]}
-
-``keyscale`` is in the apps' picker form (``"A minor"``, sharps only);
-``timesignature`` is beats per bar as a string (``"4"``).
+Document (``catalogue_metadata.json``): ``{"schema_version": "1.0.0",
+"artist_id", "tracks": [{"track_id", "title", "duration", "bpm",
+"bpm_confidence", "octave_resolved", "keyscale", "key_confidence",
+"timesignature"}]}``. ``keyscale`` is in the apps' picker form (``"A minor"``,
+sharps only); ``timesignature`` is beats per bar as a string (``"4"``).
 """
 
 from __future__ import annotations
@@ -30,16 +19,12 @@ from khaos_attribution.prompt_expansion import normalise_keyscale, normalise_tim
 CATALOGUE_METADATA_VERSION = "1.0.0"
 CATALOGUE_METADATA_FILENAME = "catalogue_metadata.json"
 
-# Tracks whose tempo or key the extractor was unsure about — or never
-# rated — are left out of the defaults: a wrong octave or a guessed key
-# would steer every blank prompt. 0.5 is the extractor's "coin flip" level.
+# Tracks the extractor was unsure about are left out of the defaults; 0.5 is
+# its "coin flip" level.
 MIN_CONFIDENCE = 0.5
 BPM_RANGE = (40, 240)
-# Perceived-tempo band. Beat trackers report octave errors freely (the
-# catalogue this was built on had 41 of 77 tracks under 80 bpm, many of
-# them marked 2/4 — half-tempo readings of 4/4 songs). Conditioning wants
-# the tempo a listener would tap, so tempos are folded into this band
-# before the median: doubled below it, halved above it.
+# Perceived-tempo band: beat trackers report octave errors freely, so tempos
+# are folded into this band before the median.
 PERCEIVED_BPM = (70, 160)
 
 
@@ -49,8 +34,6 @@ def track_row(track_id: str, title: str | None, metadata: dict | None,
     (tempo/key/time_signature dicts as the metadata stage writes them).
     Missing pieces become None; nothing is guessed."""
     md = metadata if isinstance(metadata, dict) else {}
-    # A field that is not the dict the metadata stage writes is treated as
-    # absent — the row still lists the track, with None where nothing is known.
     tempo = md.get("tempo") if isinstance(md.get("tempo"), dict) else {}
     key = md.get("key") if isinstance(md.get("key"), dict) else {}
     ts = md.get("time_signature") if isinstance(md.get("time_signature"), dict) else {}
@@ -63,8 +46,7 @@ def track_row(track_id: str, title: str | None, metadata: dict | None,
         "duration": float(duration) if duration is not None else None,
         "bpm": _number(tempo.get("bpm")),
         "bpm_confidence": _number(tempo.get("confidence")),
-        # The metadata stage (0.2.0+) records whether it resolved an octave
-        # disagreement against the downbeat grid; such a tempo is final.
+        # A tempo resolved against the downbeat grid is final.
         "octave_resolved": tempo.get("octave_resolved") is True,
         "keyscale": keyscale,
         "key_confidence": _number(key.get("confidence")),
@@ -84,8 +66,7 @@ def catalogue_defaults(document: dict | None) -> dict:
     and time signature are the most common confident values."""
     out = {"bpm": None, "keyscale": None, "timesignature": None, "tracks_used": 0}
     raw = (document or {}).get("tracks") if isinstance(document, dict) else None
-    # A hand-edited or torn file must degrade to "no defaults", never
-    # break the server that reads it: rows are coerced, not trusted.
+    # A hand-edited or torn file degrades to "no defaults": rows are coerced.
     tracks = [_clean_row(t) for t in (raw or []) if isinstance(t, dict) and t.get("track_id")]
     if not tracks:
         return out
@@ -97,8 +78,7 @@ def catalogue_defaults(document: dict | None) -> dict:
         weighted: list[float] = []
         for t in tempo_rows:
             weight = max(1, int(round((t["duration"] or 60.0) / 30.0)))
-            # A tempo the extractor already resolved against the downbeat
-            # grid is trusted as read; only unresolved readings are folded.
+            # Only unresolved readings are folded.
             bpm = t["bpm"] if t["octave_resolved"] else fold_tempo(t["bpm"])
             weighted.extend([bpm] * weight)
         out["bpm"] = int(round(statistics.median(weighted)))

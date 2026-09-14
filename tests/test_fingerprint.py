@@ -72,13 +72,8 @@ def test_survives_mp3(tmp_path):
 
 
 def test_repetitive_audio_limitation_is_known_and_dominance_separates():
-    """DOCUMENTED LIMITATION: same-tempo click tracks are near-identical
-    to the whole landmark-algorithm class (the constellation is the
-    transient's, and the tempo locks the offsets) — pairwise confidence
-    alone cannot separate them. What DOES separate the true source is
-    DOMINANCE: the true candidate out-votes the impostor decisively, so
-    the Platform's closed-set matcher requires best >= 2x runner-up.
-    This test pins those facts so the limitation stays visible."""
+    """Same-tempo click tracks are pairwise-confident against each other;
+    dominance (best >= 2x runner-up) is what separates the true source."""
     sr = 44100
     t = np.arange(int(10 * sr)) / sr
 

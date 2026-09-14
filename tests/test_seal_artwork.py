@@ -120,10 +120,8 @@ def test_when_nothing_is_legible_nothing_is_placed():
 
 
 def test_the_renderer_reproduces_the_approved_references_geometry():
-    """assets/guild-seal.svg and guild-seal-light.svg are the approved
-    design. Our render must place every ring glyph and every punch where
-    they do (to a thousandth), in the same colours — the references are
-    the acceptance, not a picture to resemble."""
+    """The approved references under assets/ are the acceptance: every ring
+    glyph and punch must land where they do, in the same colours."""
     def transforms(svg):   # flat: x, y, rotation per ring glyph, in order
         return [float(v) for m in re.findall(r'translate\(([-\d.]+),([-\d.]+)\) rotate\(([-\d.]+)\) scale\(0\.044', svg)
                 for v in m]

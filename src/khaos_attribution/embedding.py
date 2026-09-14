@@ -1,19 +1,12 @@
-"""The embedding contract: how ANY Khaos surface turns audio into the one
+"""The embedding contract: how any Khaos surface turns audio into the one
 CLAP vector space where catalogue and outputs are comparable.
 
-The Workshop embeds training segments; the Listening Space embeds generated
-outputs. An estimate compares the two, so both sides MUST embed identically
-— same model, same pinned checkpoint, same deterministic windowing, same
-pooling. That is why this file lives in the contract package: the constants
-and the pure math are single-sourced here, and each app supplies only its
-model forward pass.
-
-Why deterministic windowing exists at all (hard-won in the Workshop):
-laion_clap crops anything longer than 10 s to a RANDOM 10 s window with the
-unseeded global RNG, so the same audio embedded twice differed by more than
-real musical difference. Fixed 10 s windows at a 5 s hop, each unit-
-normalised BEFORE mean-pooling, make the same audio produce the same vector
-forever.
+Both sides must embed identically — same model, same pinned checkpoint,
+same deterministic windowing, same pooling — so the constants and the pure
+math live here and each app supplies only its model forward pass. Fixed
+10 s windows at a 5 s hop, each unit-normalised before mean-pooling,
+replace laion_clap's random crop so the same audio always gives the same
+vector.
 """
 
 from __future__ import annotations
@@ -61,10 +54,8 @@ def window_starts(n_samples: int, win: int, hop: int) -> list[int]:
 def embed_windows(audio: np.ndarray, embed_batch) -> np.ndarray:
     """Mean-pool the embeddings of deterministic windows over `audio`.
 
-    Each window is unit-normalised BEFORE pooling so one loud window cannot
-    dominate the mean; the caller normalises the pooled result. Short audio
-    yields exactly one window through the same path — no special case.
-    `embed_batch` is the app's model forward: (batch of windows) -> vectors.
+    Each window is unit-normalised before pooling; the caller normalises the
+    pooled result. `embed_batch` is the app's model forward.
     """
     win = int(WINDOW_SEC * TARGET_SR)
     hop = int(HOP_SEC * TARGET_SR)

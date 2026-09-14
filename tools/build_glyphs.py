@@ -1,20 +1,12 @@
 #!/usr/bin/env python
 """Build-time only: Red Hat Display Bold outlines -> khaos_attribution/seal/glyphs.json.
 
-Runs once, by hand, and is not on any runtime path. The seal renderer draws
-type as vector paths from the table this writes, so the runtime has no font
-dependency, no <text> element and nothing to fetch. Re-run only when the
-charset or the font changes; commit the result.
+Run by hand when the charset or the font changes; commit the result:
 
     <any python with fontTools> tools/build_glyphs.py path/to/RedHatDisplay-Bold.ttf
 
-Every glyph is normalised to a 1000-unit em: the path `d` and the advance
-are in those units, and the renderer scales by (type size / 1000).
-Red Hat Display ships at 1000 upem already, so the scale is 1; the
-normalisation is here so a different font would still produce a valid table.
-
-Licence: Red Hat Display is SIL OFL 1.1 with Reserved Font Name "Red Hat".
-The table is a derived work of the Font Software; the OFL travels beside it
+Every glyph is normalised to a 1000-unit em. Red Hat Display is SIL OFL 1.1
+with Reserved Font Name "Red Hat": the OFL travels beside the table
 (seal/OFL.txt) and the derived file carries no reserved name.
 """
 from __future__ import annotations

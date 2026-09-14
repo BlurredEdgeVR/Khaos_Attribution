@@ -1,34 +1,13 @@
 """Prompt expansion — one idea in, the adapter's caption dialect out.
 
-Shared by the Workshop (Inference tab) and the Listening Space (Simple
-mode): both rewrite a listener's short request into the prose dialect an
-adapter was trained in, by few-shotting a small LM on the adapter's own
-training captions. Everything the two apps must agree on lives here —
-the exemplar file shape, which exemplars to show the LM, the query
-template, the tidy-up of what comes back, and the trigger rule — so a
-tuning lands in both apps at once instead of through "keep in sync"
-comments.
-
+Shared by the Workshop and the Listening Space: the exemplar file shape,
+exemplar selection, the query template, the tidy-up and the trigger rule.
 The exemplar file (``prompt_exemplars.json``, written by the Workshop at
-training completion, read-only everywhere else)::
-
-    {"exemplars_version": "0.2.0", "artist_id", "trigger_phrase",
-     "created_at_utc",
-     "embedding": {"model": "Qwen3-Embedding-0.6B", "dim": 1024} | null,
-     "exemplars": [{"text", "section", "track", "vector": [...] | null}, ...]}
-
-Version 0.1.0 files carry plain strings in ``exemplars`` and no vectors;
-``normalise_exemplars`` reads both.
-
-Relevance: the LM copies the *shape* of the examples it sees, so the
-examples should be the captions closest to the request — not the first
-three in the file (those were three intros). Ranking is by cosine over
-``Qwen3-Embedding-0.6B`` vectors when the file carries them and the caller
-can embed the request (``embed_texts``; the same encoder ACE-Step already
-holds as its text encoder), else by lexical overlap. "Try another" rotates
-the window over the ranked list (``attempt``).
-
-Heavy imports stay inside functions: importing this module costs nothing.
+training completion) is ``{"exemplars_version", "artist_id",
+"trigger_phrase", "created_at_utc", "embedding": {"model", "dim"} | null,
+"exemplars": [{"text", "section", "track", "vector" | null}, ...]}``;
+0.1.0 files carry plain strings and no vectors, and both are read.
+Heavy imports stay inside functions.
 """
 
 from __future__ import annotations
@@ -41,16 +20,13 @@ EXEMPLARS_VERSION = "0.2.0"
 EXEMPLARS_FILENAME = "prompt_exemplars.json"
 EMBEDDING_MODEL = "Qwen3-Embedding-0.6B"
 
-# Tuned live against the 1.7B: six exemplars at temperature 0.85 made the
-# LM copy the examples' musical content wholesale; three at 0.5 keep the
-# dialect while the request stays in charge.
+# More exemplars or a higher temperature make the LM copy the examples'
+# musical content rather than their dialect.
 FEW_SHOT_COUNT = 3
 TEMPERATURE = 0.5
 
-# Training captions sit in a tight band (47–66 words across every adapter
-# exported so far); the LM is told the band and the result is clipped to
-# the exporter's own limit so nothing longer than a training caption ever
-# reaches the engine.
+# The band training captions sit in; the result is clipped to the exporter's
+# own limit so nothing longer than a training caption reaches the engine.
 CAPTION_WORDS = (45, 70)
 MIN_CAPTION_CHARS = 80
 MAX_CAPTION_CHARS = 420
@@ -91,8 +67,7 @@ def _tokens(text: str) -> set[str]:
         w = w.strip("'")
         if len(w) < 3 or w in _STOPWORDS:
             continue
-        # Crude suffix strip so "drums" meets "drum" and "driving" meets
-        # "drives" (both → "driv"); it is a tie-breaker, not a stemmer.
+        # Crude suffix strip so "drums" meets "drum"; a tie-breaker, not a stemmer.
         for suffix in ("ing", "ed", "es", "s"):
             if len(w) > len(suffix) + 3 and w.endswith(suffix):
                 w = w[: -len(suffix)]
@@ -129,9 +104,8 @@ def rank_exemplars(request: str, exemplars: list[dict],
     vec = list(request_vector) if request_vector is not None else None
     if vec and exemplars and all(e.get("vector") for e in exemplars) \
             and all(len(e["vector"]) == len(vec) for e in exemplars):
-        # A dimension mismatch (file embedded by one model, request by
-        # another) would score every exemplar 0 and quietly return file
-        # order under the "embedding" label — so it ranks lexically instead.
+        # A dimension mismatch would score every exemplar 0 under the
+        # "embedding" label, so it ranks lexically instead.
         scores = [_cosine(vec, e["vector"]) for e in exemplars]
         method = "embedding"
     else:
@@ -152,9 +126,7 @@ def select_exemplars(request: str, exemplars: list[dict], attempt: int = 0,
         return [], method
     n = len(order)
     count = max(1, min(count, n))
-    # Enough exemplars: each attempt is the next window. Fewer than a
-    # window: every attempt sees them all, so rotate which one LEADS — the
-    # first example anchors the LM's voice most.
+    # With fewer exemplars than a window, rotate which one leads instead.
     start = (max(0, attempt) * count) % n if n > count else max(0, attempt) % n
     chosen = [order[(start + i) % n] for i in range(count)]
     return chosen, method
@@ -163,10 +135,8 @@ def select_exemplars(request: str, exemplars: list[dict], attempt: int = 0,
 # ── the query ────────────────────────────────────────────────────────────
 
 def build_query(request: str, shots: list[str], instrumental: bool = True) -> str:
-    """The text handed to the 5Hz LM's Simple-mode entry. Style and content
-    are separated on purpose: an early draft let the LM copy the
-    exemplars' musical content along with their voice ("dark hypnotic
-    groove" came back as bright indie-pop)."""
+    """The text handed to the 5Hz LM's Simple-mode entry; style and content
+    are separated on purpose."""
     lo, hi = CAPTION_WORDS
     examples = "\n".join(f"- {s}" for s in shots)
     vocals = ("The music is instrumental — no vocals, no singing."
@@ -188,10 +158,8 @@ def build_query(request: str, shots: list[str], instrumental: bool = True) -> st
 
 # ── tidying what comes back ──────────────────────────────────────────────
 
-# The 1.7B leaks clock-time anchors ("At 1:26, the song shifts…") despite
-# the instruction, and training captions never contain them (the
-# Workshop's cleanup strips all time references). Longer alternatives
-# first, or "At" would match inside "At around" and leave the stamp behind.
+# The LM leaks clock-time anchors ("At 1:26, …") despite the instruction.
+# Longer alternatives first, or "At" would match inside "At around".
 _TIMESTAMP = re.compile(
     r"(?:,\s*)?\b(?:[Aa]t\s+around|[Aa]round|[Aa]t|[Aa]fter|[Bb]y|[Nn]ear)\s+"
     r"(?:the\s+)?\d{1,2}:\d{2}(?:\s+mark)?,?\s*"
@@ -222,9 +190,8 @@ _WRAPPING_QUOTES = "'\"`\u2018\u2019\u201c\u201d"
 
 
 def strip_wrapping_quotes(text: str) -> str:
-    """The LM sometimes returns its caption quoted — 'A delicate…' or
-    "…texture." — and a prompt must not begin with a stray quote mark.
-    Only quotes at the very ends go; apostrophes inside the prose stay."""
+    """Strip quote marks wrapping the whole caption; apostrophes inside the
+    prose stay."""
     text = (text or "").strip()
     while len(text) > 1 and text[0] in _WRAPPING_QUOTES and (text[-1] in _WRAPPING_QUOTES
                                                              or text.count(text[0]) == 1):
@@ -330,9 +297,7 @@ def harvest(metadata: dict | None, instrumental: bool = True) -> dict:
 
 def embed_texts(model, tokenizer, texts: list[str], max_length: int = 256):
     """L2-normalised mean-pooled embeddings from a loaded Qwen3-Embedding
-    encoder (``transformers`` AutoModel + AutoTokenizer — the pair ACE-Step
-    holds as its text encoder). Returns a ``(len(texts), dim)`` numpy
-    array. Caller supplies the model; this function loads nothing."""
+    encoder, as a ``(len(texts), dim)`` numpy array. Loads nothing."""
     import numpy as np  # noqa: PLC0415
     import torch  # noqa: PLC0415
 
@@ -354,9 +319,8 @@ def embed_texts(model, tokenizer, texts: list[str], max_length: int = 256):
 
 
 class TextEmbedder:
-    """Lazy owner of a Qwen3-Embedding encoder for processes that do not
-    already hold one (the Workshop's exporter). ``available()`` says
-    whether the weights and libraries are present without loading them."""
+    """Lazy owner of a Qwen3-Embedding encoder. ``available()`` says whether
+    the weights and libraries are present without loading them."""
 
     def __init__(self, model_dir, device: str | None = None):
         from pathlib import Path  # noqa: PLC0415

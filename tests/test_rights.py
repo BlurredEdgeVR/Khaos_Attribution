@@ -1,12 +1,5 @@
-"""The track-level rights contract and the attribution estimate.
-
-Two document types added in 0.5.0, both additive — the provenance record
-and model card are untouched. The rights record is data entry (who owns a
-training track); the estimate is arithmetic (how much of an output each
-track — and therefore each writer — plausibly accounts for). Money maths
-the schema language cannot express (shares summing to 100, points inside
-their own ranges) is tested here against the validator functions.
-"""
+"""The track-level rights contract and the attribution estimate, including
+the money maths the schema language cannot express."""
 
 import copy
 
@@ -52,8 +45,7 @@ def test_writer_shares_must_sum_to_100():
 
 
 def test_publishers_may_be_empty_but_not_partial():
-    """Unpublished work has no publishers — that is a fact, not an error.
-    A publisher pool that exists but does not add up is an error."""
+    """An empty publisher pool is legitimate; a partial one is an error."""
     record = copy.deepcopy(GOOD_RIGHTS)
     record["publishers"] = []
     validate_track_rights(record)
@@ -85,8 +77,7 @@ def test_iswc_format_is_enforced():
 
 
 def test_assigned_code_requires_a_value():
-    """'assigned' with no value is the dishonest middle this schema exists
-    to forbid: either the code is known, or the status says why not."""
+    """Either the code is known, or the status says why not."""
     record = copy.deepcopy(GOOD_RIGHTS)
     record["isrc"] = {"status": "assigned"}
     with pytest.raises(AttributionValidationError):
@@ -94,8 +85,7 @@ def test_assigned_code_requires_a_value():
 
 
 def test_absence_is_explicit_not_omitted():
-    """A record without the isrc/iswc fields entirely must not validate —
-    'not yet looked up' is information and has to be said."""
+    """A record without the isrc/iswc fields must not validate."""
     record = copy.deepcopy(GOOD_RIGHTS)
     del record["iswc"]
     with pytest.raises(AttributionValidationError):
@@ -152,8 +142,7 @@ def test_influence_must_account_for_the_whole_output():
 
 
 def test_a_point_outside_its_own_range_is_rejected():
-    """The range is the honesty mechanism; a blended share outside it is a
-    claim no method made."""
+    """A blended share outside its own range is a claim no method made."""
     record = copy.deepcopy(GOOD_ESTIMATE)
     record["influence"][0]["share_range_pct"] = [10.0, 20.0]
     with pytest.raises(AttributionValidationError, match="outside its own range"):
@@ -161,8 +150,7 @@ def test_a_point_outside_its_own_range_is_rejected():
 
 
 def test_similarity_share_may_be_null_but_not_missing():
-    """When similarity was uninformative there is no similarity share — the
-    field says so as null rather than disappearing."""
+    """An uninformative similarity share is null, not absent."""
     record = copy.deepcopy(GOOD_ESTIMATE)
     for entry in record["influence"]:
         entry["similarity_share_pct"] = None
@@ -178,7 +166,6 @@ def test_similarity_share_may_be_null_but_not_missing():
 
 
 def test_the_method_block_is_required():
-    """An estimate without its methodology is a rumour with decimals."""
     record = copy.deepcopy(GOOD_ESTIMATE)
     del record["method"]
     with pytest.raises(AttributionValidationError):
@@ -186,8 +173,7 @@ def test_the_method_block_is_required():
 
 
 def test_code_errors_speak_english_not_regex():
-    """The operator who typed nothing into an 'assigned' ISWC must read
-    "carries no code", never "'' does not match '^T-[0-9]{9}-[0-9]$'"."""
+    """Code errors are reported in words, never as the schema regex."""
     record = copy.deepcopy(GOOD_RIGHTS)
     record["iswc"] = {"status": "assigned", "value": ""}
     with pytest.raises(AttributionValidationError) as exc:
@@ -207,8 +193,7 @@ def test_code_errors_speak_english_not_regex():
 
 
 def test_empty_code_string_under_any_status_speaks_english():
-    """'' under a non-assigned status skipped every word-check and leaked
-    the schema regex — found in review."""
+    """An empty code string under a non-assigned status must not leak the regex."""
     record = copy.deepcopy(GOOD_RIGHTS)
     record["iswc"] = {"status": "none_assigned", "value": ""}
     with pytest.raises(AttributionValidationError) as exc:
@@ -218,9 +203,7 @@ def test_empty_code_string_under_any_status_speaks_english():
 
 
 def test_masters_pool_is_optional_but_must_add_up():
-    """The recording side (℗) joins the sheet in 0.10.0: optional — absence
-    means not yet recorded — but a partial pool is an error, same as
-    publishers."""
+    """The masters pool is optional, but a partial pool is an error."""
     record = copy.deepcopy(GOOD_RIGHTS)
     validate_track_rights(record)                     # no masters: fine
     record["masters"] = [{"name": "Example Records", "share_pct": 100}]
