@@ -179,18 +179,22 @@ def exposure_from_index(index: InfluenceIndex) -> dict:
 
 
 def resemblance_block(clap_document: Mapping, influence_shares: Mapping[str, float]) -> dict:
-    """The CLAP estimate read beside influence: its shares, whether its
-    signal was informative, and how far the two splits agree."""
-    tracks = sorted(set(influence_shares) | {t["track_id"] for t in clap_document.get("influence", [])})
-    clap = {t["track_id"]: float(t["blended_share_pct"]) / 100.0 for t in clap_document.get("influence", [])}
+    """The CLAP estimate read beside influence: its similarity shares (none
+    when the signal was uninformative: the blend is then only the exposure
+    prior), and how far the two splits agree."""
+    informative = bool(clap_document.get("method", {}).get("similarity_informative"))
+    clap = ({t["track_id"]: float(t["similarity_share_pct"]) / 100.0
+             for t in clap_document.get("influence", []) if t.get("similarity_share_pct") is not None}
+            if informative else {})
+    tracks = sorted(set(influence_shares) | set(clap))
     a = [float(influence_shares.get(t, 0.0)) for t in tracks]
     b = [clap.get(t, 0.0) for t in tracks]
-    money = 1.0 - 0.5 * sum(abs(x - y) for x, y in zip(a, b))
+    money = (1.0 - 0.5 * sum(abs(x - y) for x, y in zip(a, b))) if clap else None
     return {"method": "clap_blend", "estimator_version": str(clap_document.get("method", {}).get("estimator_version")),
-            "similarity_informative": bool(clap_document.get("method", {}).get("similarity_informative")),
+            "similarity_informative": informative,
             "shares_pct": {t: round(v * 100, 4) for t, v in clap.items()},
-            "money_agreement_with_influence": round(money, 4),
-            "rank_agreement_with_influence": _spearman(a, b),
+            "money_agreement_with_influence": (round(money, 4) if money is not None else None),
+            "rank_agreement_with_influence": (_spearman(a, b) if clap else None),
             "note": "resemblance to the training audio, not influence on this output"}
 
 
@@ -227,6 +231,8 @@ def build_influence_estimate(*, generation_id: str, artist_id: str, adapter_vers
     share = shares(track_totals)
     if not share:
         raise InfluenceRefused("no track totals to build an estimate from")
+    if sum(share.values()) <= 0:
+        raise InfluenceRefused("no training track has positive influence on this output; nothing to split")
     caveats = [BASE_CAVEAT, *extra_caveats]
     if dataset_hash_note:
         caveats.append(dataset_hash_note)

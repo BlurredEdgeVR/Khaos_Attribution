@@ -118,10 +118,17 @@ def test_document_validates_with_influence_as_the_share_the_money_follows(tmp_pa
 
 def test_document_carries_resemblance_beside_influence_never_inside_it(tmp_path):
     clap = {"method": {"estimator_version": "0.5.0", "similarity_informative": True},
-            "influence": [{"track_id": "ta", "blended_share_pct": 40.0}, {"track_id": "tb", "blended_share_pct": 35.0},
-                          {"track_id": "tc", "blended_share_pct": 25.0}]}
+            "influence": [{"track_id": "ta", "blended_share_pct": 50.0, "similarity_share_pct": 40.0},
+                          {"track_id": "tb", "blended_share_pct": 30.0, "similarity_share_pct": 35.0},
+                          {"track_id": "tc", "blended_share_pct": 20.0, "similarity_share_pct": 25.0}]}
     res = I.resemblance_block(clap, {"ta": 0.75, "tb": 0.25, "tc": 0.0})
+    assert res["shares_pct"] == {"ta": 40.0, "tb": 35.0, "tc": 25.0}
     assert res["money_agreement_with_influence"] == pytest.approx(1 - 0.5 * (0.35 + 0.10 + 0.25))
+    # Uninformative similarity: the blend is only the exposure prior, so no resemblance shares are carried.
+    dull = {"method": {"estimator_version": "0.5.0", "similarity_informative": False},
+            "influence": [{"track_id": "ta", "blended_share_pct": 60.0, "similarity_share_pct": None}]}
+    quiet = I.resemblance_block(dull, {"ta": 1.0})
+    assert quiet["shares_pct"] == {} and quiet["money_agreement_with_influence"] is None and quiet["similarity_informative"] is False
     doc = _doc(tmp_path, resemblance=res)
     assert doc["resemblance"]["method"] == "clap_blend" and doc["method"]["similarity_informative"] is True
     by = {t["track_id"]: t for t in doc["influence"]}
@@ -132,3 +139,8 @@ def test_a_dataset_hash_note_becomes_a_caveat(tmp_path):
     doc = _doc(tmp_path, dataset_hash=None, dataset_hash_note="Attributed against today's data; the run recorded no dataset hash.")
     assert doc["method"]["dataset_hash"] is None
     assert any("today's data" in c for c in doc["caveats"])
+
+
+def test_an_output_no_track_helped_is_refused_not_split(tmp_path):
+    with pytest.raises(I.InfluenceRefused, match="no training track has positive influence"):
+        _doc(tmp_path, track_totals={"ta": -1.0, "tb": -0.5, "tc": 0.0})

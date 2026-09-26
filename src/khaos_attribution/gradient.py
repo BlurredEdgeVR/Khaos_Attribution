@@ -127,12 +127,9 @@ def load_sample(path: Path | str) -> dict:
 def pair_gradient(module: Any, sample: dict, *, timesteps: Sequence[float], noise_seed: int,
                   params: Sequence[Any] | None = None, target: str = "vnorm",
                   timestep_norm: bool = False) -> np.ndarray:
-    """The mean adapter gradient of one pair over ``timesteps``, flat, on the
-    CPU, float32: the trainer's forward with no CFG dropout, ``t`` on the
-    grid, per-pair seeded noise, ``timestep_r = t`` and the decoder in eval.
-    ``vnorm`` differentiates the squared norm of the predicted velocity,
-    ``loss`` the flow-matching MSE.
-    """
+    """The mean adapter gradient of one pair over ``timesteps``, flat, float32,
+    from the trainer's forward with the randomness removed; ``vnorm``
+    differentiates the predicted velocity's squared norm, ``loss`` the MSE."""
     import torch  # noqa: PLC0415
     from contextlib import nullcontext  # noqa: PLC0415
 
