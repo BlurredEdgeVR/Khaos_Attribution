@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "khaos_attribution"
-version = "0.20.0"
+version = "0.21.0"
 description = "JSON schemas and validators for artist attribution: provenance records and model cards."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -22,6 +22,8 @@ dependencies = [
 test = ["pytest>=7", "soundfile>=0.12", "pillow>=10"]  # fingerprint survival tests decode real audio; the seal-on-artwork tests read pixels
 # Placing the seal on hero artwork reads the artwork's pixels; the seal renderers themselves need nothing.
 artwork = ["pillow>=10"]
+# gradient.py: features of a live training module; the engine itself is found at run time.
+gradient = ["torch>=2.2"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

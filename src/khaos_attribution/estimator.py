@@ -14,7 +14,7 @@ from typing import Iterable
 import numpy as np
 
 from khaos_attribution import aspects as _aspects
-from khaos_attribution import blend
+from khaos_attribution import ATTRIBUTION_ESTIMATE_SCHEMA_VERSION, blend
 from khaos_attribution import diagnostics as _diagnostics
 from khaos_attribution.validation import validate_attribution_estimate
 
@@ -168,7 +168,7 @@ def build_estimate(*, generation_id: str, artist_id: str,
         })
 
     document = {
-        "schema_version": "1.0.0",
+        "schema_version": ATTRIBUTION_ESTIMATE_SCHEMA_VERSION,
         "generation_id": generation_id,
         "artist_id": artist_id,
         "adapter_version": adapter_version,

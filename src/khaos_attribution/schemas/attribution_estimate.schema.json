@@ -8,7 +8,10 @@
     "schema_version": {
       "type": "string",
       "pattern": "^\\d+\\.\\d+\\.\\d+$",
-      "const": "1.0.0"
+      "enum": [
+        "1.0.0",
+        "1.1.0"
+      ]
     },
     "generation_id": {
       "type": "string",
@@ -28,7 +31,7 @@
     },
     "method": {
       "type": "object",
-      "description": "Exactly how this estimate was computed \u2014 an estimate without its method is a rumour.",
+      "description": "Exactly how this estimate was computed — an estimate without its method is a rumour.",
       "properties": {
         "estimator_version": {
           "type": "string",
@@ -52,7 +55,7 @@
         },
         "similarity_informative": {
           "type": "boolean",
-          "description": "False when the acoustic similarity spread across tracks was below the noise floor, in which case blended shares equal the exposure prior."
+          "description": "False when the acoustic similarity spread across tracks was below the noise floor, in which case blended shares equal the exposure prior (clap_blend), or when no resemblance block was read (dtrak)."
         },
         "temperature": {
           "type": [
@@ -60,6 +63,14 @@
             "null"
           ],
           "description": "Softmax temperature used to turn similarity scores into weights; null when similarity was uninformative."
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "clap_blend",
+            "dtrak"
+          ],
+          "description": "clap_blend: exposure prior corrected by CLAP resemblance (the default). dtrak: measured influence from the D-TRAK kernel over the adapter's gradient index; then blended_share_pct is the influence share and similarity_informative describes the resemblance block, if any."
         }
       },
       "required": [
@@ -106,7 +117,7 @@
           },
           "share_range_pct": {
             "type": "array",
-            "description": "[low, high] \u2014 the disagreement interval across methods. A number outside this range is a claim no method made.",
+            "description": "[low, high] — the disagreement interval across methods. A number outside this range is a claim no method made.",
             "items": {
               "type": "number",
               "minimum": 0,
@@ -114,6 +125,12 @@
             },
             "minItems": 2,
             "maxItems": 2
+          },
+          "influence_share_pct": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "The measured influence share (method.kind dtrak); equal to blended_share_pct on such a document."
           }
         },
         "required": [
@@ -128,7 +145,7 @@
     },
     "splits": {
       "type": "object",
-      "description": "The money math: each party's estimated share of this output, from track influence \u00d7 their share of each track.",
+      "description": "The money math: each party's estimated share of this output, from track influence × their share of each track.",
       "properties": {
         "writers": {
           "type": "array",
@@ -169,6 +186,10 @@
       "items": {
         "type": "string"
       }
+    },
+    "resemblance": {
+      "type": "object",
+      "description": "On a dtrak document: the CLAP resemblance reading kept beside influence, with how far the two splits agree. Resemblance is not influence."
     }
   },
   "required": [

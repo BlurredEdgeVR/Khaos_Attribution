@@ -95,7 +95,7 @@ def test_absence_is_explicit_not_omitted():
 # ── the estimate ─────────────────────────────────────────────────────────────
 
 GOOD_ESTIMATE = {
-    "schema_version": "1.0.0",
+    "schema_version": "1.1.0",
     "generation_id": "abc123",
     "artist_id": "artist-0001",
     "adapter_version": "run_20260810",

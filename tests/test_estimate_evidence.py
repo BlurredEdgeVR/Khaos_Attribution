@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from khaos_attribution import ATTRIBUTION_ESTIMATE_SCHEMA_VERSION
 from khaos_attribution.estimator import build_estimate
 
 BASE = dict(
@@ -101,7 +102,7 @@ def test_the_document_still_validates_with_both_blocks_present():
         output_metadata={"bpm": 120, "key": {"tonic": "A", "mode": "minor"}},
         track_metadata={"t1": {"bpm": 120, "key": {"tonic": "A", "mode": "minor"}}})
     # build_estimate validates before returning; reaching here is the pin.
-    assert doc["schema_version"] == "1.0.0"
+    assert doc["schema_version"] == ATTRIBUTION_ESTIMATE_SCHEMA_VERSION
     assert "reliability" in doc["method"] and "aspects" in doc["method"]
 
 

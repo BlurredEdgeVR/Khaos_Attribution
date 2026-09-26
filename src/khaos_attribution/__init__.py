@@ -16,7 +16,7 @@ from khaos_attribution.validation import (
 PROVENANCE_SCHEMA_VERSION = "1.0.0"
 MODEL_CARD_SCHEMA_VERSION = "1.1.0"  # writers stamp the newest; 1.0.0 still validates
 TRACK_RIGHTS_SCHEMA_VERSION = "1.0.0"
-ATTRIBUTION_ESTIMATE_SCHEMA_VERSION = "1.0.0"
+ATTRIBUTION_ESTIMATE_SCHEMA_VERSION = "1.1.0"  # 1.0.0 still validates
 
 __all__ = [
     "ATTRIBUTION_ESTIMATE_SCHEMA_VERSION",
@@ -37,4 +37,4 @@ try:
 
     __version__ = _dist_version("khaos_attribution")
 except Exception:  # pragma: no cover - package not installed (e.g. run from a checkout)
-    __version__ = "0.20.0"  # tests/test_version.py pins this to pyproject.toml
+    __version__ = "0.21.0"  # tests/test_version.py pins this to pyproject.toml
