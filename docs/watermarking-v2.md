@@ -227,7 +227,7 @@ identified in the wild.
 Made with the <artist name> adapter
 Trained with the artist's consent · rights on file
 
-Adapter run: run_20260806_220058 (6 Aug 2026)
+Adapter run: run_20260101_120000 (1 Jan 2026)
 Exact output: matched — generation f3a1… (99.2%)
 ```
 
