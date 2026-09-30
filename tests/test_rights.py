@@ -32,6 +32,16 @@ GOOD_RIGHTS = {
 }
 
 
+def test_every_listed_source_validates_and_no_other_does():
+    from khaos_attribution import load_schema
+    listed = load_schema("track_rights.schema.json")["properties"]["source"]["enum"]
+    assert listed == ["operator-entered", "society-confirmed", "distributor", "musicbrainz", "other"]
+    for source in listed:
+        assert validate_track_rights({**copy.deepcopy(GOOD_RIGHTS), "source": source}) is not None
+    with pytest.raises(AttributionValidationError):
+        validate_track_rights({**copy.deepcopy(GOOD_RIGHTS), "source": "confirmed"})
+
+
 def test_good_rights_record_passes():
     assert validate_track_rights(copy.deepcopy(GOOD_RIGHTS)) is not None
     assert GOOD_RIGHTS["schema_version"] == TRACK_RIGHTS_SCHEMA_VERSION

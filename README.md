@@ -120,6 +120,10 @@ artwork top right (a new image, the master untouched; Pillow via the
 khaos_attribution.seal seal|marks …` writes either asset; rebuild the glyph
 table with `tools/build_glyphs.py` only when the charset or the font changes.
 
+## Where rights data came from
+
+A track's rights record names its `source`: `operator-entered`, `society-confirmed` (a collecting society's own record), `distributor`, `musicbrainz` or `other`. From 0.22.0 no other value validates, so a record written with an earlier name for the society value has to be re-saved.
+
 ## Running the tests
 
 ```bash
