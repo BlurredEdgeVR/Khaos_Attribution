@@ -52,10 +52,7 @@ VALIDATION = {
 
 BASE_CAVEAT = (
     "Measured influence: how much of this output's adapter gradient each training track "
-    "explains, read by the D-TRAK kernel over the adapter's gradient index. In a pre-registered "
-    "test on one catalogue it put 80% of the money on the right tracks, against 70% for a flat "
-    "split by training share. It is not resemblance, and it has not been validated on every "
-    "adapter recipe.")
+    "explains, read by the D-TRAK kernel over the adapter's gradient index.")
 
 
 class InfluenceRefused(ValueError):

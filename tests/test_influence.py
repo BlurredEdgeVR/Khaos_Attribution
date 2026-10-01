@@ -144,3 +144,11 @@ def test_a_dataset_hash_note_becomes_a_caveat(tmp_path):
 def test_an_output_no_track_helped_is_refused_not_split(tmp_path):
     with pytest.raises(I.InfluenceRefused, match="no training track has positive influence"):
         _doc(tmp_path, track_totals={"ta": -1.0, "tb": -0.5, "tc": 0.0})
+
+
+def test_the_base_caveat_says_what_the_number_is_and_nothing_else():
+    """One sentence on the card: what was measured and how. The validation figures
+    travel in method.validation, where a surface can choose to show them."""
+    assert I.BASE_CAVEAT.startswith("Measured influence: how much of this output's adapter gradient")
+    assert I.BASE_CAVEAT.endswith("gradient index.") and I.BASE_CAVEAT.count(".") == 1
+    assert I.VALIDATION["money_on_the_right_tracks"] == 0.802
