@@ -27,7 +27,7 @@ def _index_dir(tmp_path, *, rows=6, dim=16, seed=0, dead=()):
         records.append({"row": i, "pair_id": f"{TRACKS[i % 3]}_seg_{i:03d}", "track_id": TRACKS[i % 3],
                         "gradient_norm": norm})
     d = tmp_path / "influence_index"
-    d.mkdir()
+    d.mkdir(exist_ok=True)
     np.save(str(d / I.INDEX_MATRIX), unit)
     (d / I.INDEX_RECORD).write_text(json.dumps({
         "schema": I.INDEX_SCHEMA, "target": "vnorm", "timesteps": [0.25, 0.75], "noise_seed": 7,
@@ -152,3 +152,123 @@ def test_the_base_caveat_says_what_the_number_is_and_nothing_else():
     assert I.BASE_CAVEAT.startswith("Measured influence: how much of this output's adapter gradient")
     assert I.BASE_CAVEAT.endswith("gradient index.") and I.BASE_CAVEAT.count(".") == 1
     assert I.VALIDATION["money_on_the_right_tracks"] == 0.802
+
+
+def _own(n=80, seed=0):
+    rng = np.random.default_rng(seed)
+    with_adapter = rng.normal(0.80, 0.03, size=n)
+    return [{"with": float(w), "without": float(w + g)} for w, g in zip(with_adapter, rng.normal(0.70, 0.05, size=n))]
+
+
+def test_the_two_numbers_are_percentiles_of_the_adapters_own_outputs():
+    """About one in twenty of its own outputs falls outside them, and too few outputs give none."""
+    own = _own()
+    t = I.abstention_thresholds(own, device="mps", compute_dtype="bf16", harness_id="h")
+    gains = [r["without"] - r["with"] for r in own]
+    assert t["gain_min"] == round(float(np.percentile(gains, 2.5)), 4)
+    assert t["loss_max"] == round(float(np.percentile([r["with"] for r in own], 97.5)), 4)
+    assert (t["n_outputs"], t["device"], t["compute_dtype"], t["harness_id"]) == (80, "mps", "bf16", "h")
+    assert 72 <= t["own_accepted"] <= 78 and t["validation"]["record_content_hash"] == "a47e34ce8f7aebe2"
+    with pytest.raises(I.InfluenceRefused, match="needs 40 measured outputs"):
+        I.abstention_thresholds(own[:39], device="mps", compute_dtype="bf16")
+    holed = own[:39] + [{"with": float("nan"), "without": 1.0}, {"with": 0.8, "without": None}]
+    with pytest.raises(I.InfluenceRefused, match="not 39"):
+        I.abstention_thresholds(holed, device="mps", compute_dtype="bf16")
+
+
+def test_the_rule_needs_both_a_gain_and_a_good_enough_loss():
+    assert I.accepts(0.6, 0.9, 0.55, 0.99)
+    assert not I.accepts(0.55, 0.9, 0.55, 0.99) and not I.accepts(0.6, 0.99, 0.55, 0.99)
+    assert not I.accepts(None, 0.9, 0.55, 0.99) and not I.accepts(0.6, None, 0.55, 0.99)
+
+
+def test_a_reading_says_accepted_refused_or_why_it_was_not_read():
+    t = {"gain_min": 0.55, "loss_max": 0.99, "device": "mps", "compute_dtype": "bf16"}
+    here = dict(device_type="mps", compute_dtype="bf16")
+    ok = I.abstention_reading(t, {"with": 0.80, "without": 1.50}, **here)
+    assert ok["checked"] and ok["accepted"] and ok["gain"] == pytest.approx(0.70) and ok["gain_min"] == 0.55
+    base = I.abstention_reading(t, {"with": 0.95, "without": 1.00}, **here)
+    assert base["checked"] and base["accepted"] is False
+    poor = I.abstention_reading(t, {"with": 1.20, "without": 2.00}, **here)
+    assert poor["checked"] and poor["accepted"] is False
+    for reading, word in ((I.abstention_reading(None, {"with": 0.8, "without": 1.5}, **here), "published without"),
+                          (I.abstention_reading({**t, "loss_max": None}, {"with": 0.8, "without": 1.5}, **here), "published without"),
+                          (I.abstention_reading(t, {"with": 0.8, "without": 1.5}, device_type="cuda", compute_dtype="bf16"), "taken on mps"),
+                          (I.abstention_reading({**t, "device": "cuda:0"}, {"with": 0.8, "without": 1.5}, device_type="cuda", compute_dtype="fp32"), "bf16 precision"),
+                          (I.abstention_reading(t, {"with": float("nan"), "without": 1.5}, **here), "could not be measured"),
+                          (I.abstention_reading(t, None, **here), "could not be measured")):
+        assert reading["checked"] is False and reading["accepted"] is None and word in reading["reason"], word
+    assert I.abstention_reading({**t, "device": "cuda:0"}, {"with": 0.8, "without": 1.5}, device_type="cuda", compute_dtype="bf16")["accepted"]
+    assert I.abstention_unreadable(t, **here) is None
+    assert "published without" in I.abstention_unreadable({}, **here)
+    assert "taken on mps" in I.abstention_unreadable(t, device_type="cuda", compute_dtype="bf16")
+
+
+def test_a_refused_output_gets_no_document_and_an_unread_one_says_so(tmp_path):
+    """Never a percentage for an output the rule refuses; a document that was not checked carries the reason."""
+    refused = {"checked": True, "accepted": False, "gain": 0.05, "loss_with": 0.95, "gain_min": 0.55, "loss_max": 0.99}
+    with pytest.raises(I.NotAttributable) as caught:
+        _doc(tmp_path, abstention=refused)
+    assert str(caught.value) == I.NOT_ATTRIBUTABLE and caught.value.reading["gain"] == 0.05
+    assert isinstance(caught.value, I.InfluenceRefused) and I.NOT_ATTRIBUTABLE.count(".") == 1
+    accepted = _doc(tmp_path, abstention={**refused, "accepted": True, "gain": 0.7})
+    assert accepted["method"]["abstention"]["accepted"] is True and len(accepted["caveats"]) == len(_doc(tmp_path)["caveats"])
+    unread = _doc(tmp_path, abstention={"checked": False, "accepted": None, "reason": "its two numbers were taken on mps"})
+    assert unread["method"]["abstention"]["checked"] is False
+    assert "Not checked for outputs this adapter did not shape: its two numbers were taken on mps." in unread["caveats"]
+    assert "abstention" not in _doc(tmp_path)["method"]
+
+
+def test_a_kept_refusal_stands_until_its_own_adapter_can_be_read_afresh():
+    """Another adapter served, no bundle, or no numbers: the refusal still answers. The same adapter
+    under another index or other numbers: the output is read again."""
+    reading = {"checked": True, "accepted": False, "gain": 0.05, "gain_min": 0.55, "loss_max": 0.99}
+    meta = {"index_sha256": "abc", "adapter_sha256": "w", "abstention": {"gain_min": 0.55, "loss_max": 0.99}}
+    kept = I.refusal_record("g1", reading, meta)
+    assert kept["not_attributable"] is True and kept["reason"] == I.NOT_ATTRIBUTABLE and kept["reading"]["gain"] == 0.05
+    assert (kept["generation_id"], kept["index_sha256"], kept["adapter_sha256"]) == ("g1", "abc", "w") and kept["refused_at_utc"]
+    assert I.refusal_stands(kept, meta)
+    assert I.refusal_stands(kept, None) and I.refusal_stands(kept, {})
+    assert I.refusal_stands(kept, {**meta, "adapter_sha256": "other weights", "index_sha256": "xyz"})
+    assert I.refusal_stands(kept, {**meta, "abstention": None}) and I.refusal_stands(kept, {**meta, "abstention": {"gain_min": None}})
+    assert not I.refusal_stands(kept, {**meta, "index_sha256": "rebuilt"})
+    assert not I.refusal_stands(kept, {**meta, "abstention": {"gain_min": 0.50, "loss_max": 0.99}})
+    assert not I.refusal_stands(kept, {**meta, "abstention": {"gain_min": 0.55, "loss_max": 1.10}})
+    assert not I.refusal_stands(None, meta) and not I.refusal_stands({**kept, "not_attributable": False}, meta)
+
+
+def test_numbers_taken_beside_another_index_are_not_read():
+    t = {"gain_min": 0.55, "loss_max": 0.99, "device": "mps", "compute_dtype": "bf16", "index_sha256": "abc"}
+    here = dict(device_type="mps", compute_dtype="bf16")
+    assert I.abstention_unreadable(t, index_sha256="abc", **here) is None and I.abstention_unreadable(t, **here) is None
+    assert "another influence index" in I.abstention_unreadable(t, index_sha256="rebuilt", **here)
+    assert I.abstention_reading(t, {"with": 0.95, "without": 1.0}, index_sha256="rebuilt", **here)["checked"] is False
+
+
+def test_the_numbers_are_read_only_near_the_length_they_were_taken_at():
+    t = {"gain_min": 0.55, "loss_max": 0.99, "device": "mps", "compute_dtype": "bf16", "render_seconds": 30}
+    here = dict(device_type="mps", compute_dtype="bf16")
+    for seconds in (15, 30, 60, 90):
+        assert I.abstention_unreadable(t, duration_sec=seconds, **here) is None
+    for seconds, word in ((14.9, "15 seconds"), (91, "91 seconds"), (240, "240 seconds")):
+        why = I.abstention_unreadable(t, duration_sec=seconds, **here)
+        assert "taken on 30-second outputs" in why and word in why
+    assert I.abstention_unreadable(t, **here) is None, "a length nobody gave is not a reason"
+    assert I.abstention_unreadable({**t, "render_seconds": None}, duration_sec=240, **here) is None
+    long = I.abstention_reading(t, {"with": 0.95, "without": 1.0}, duration_sec=120, **here)
+    assert long["checked"] is False and "120 seconds" in long["reason"], "an output outside the band is never refused by the rule"
+    assert I.abstention_reading(t, {"with": 0.95, "without": 1.0}, duration_sec=30, **here)["accepted"] is False
+
+
+def test_an_adapters_own_control_says_how_many_base_outputs_its_numbers_refuse():
+    own = _own()
+    plain = I.abstention_thresholds(own, device="mps", compute_dtype="bf16")
+    assert plain["control"] is None
+    base = [{"with": 0.95, "without": 1.00}] * 46 + [{"with": 0.80, "without": 1.60}] * 2 + [{"with": float("nan"), "without": 1.0}]
+    t = I.abstention_thresholds(own, device="mps", compute_dtype="bf16", control=base)
+    assert t["control"] == {"n": 48, "refused": 46, "rate": 0.9583, "bar": 0.9, "met": True}
+    weak = I.control_reading([{"with": 0.80, "without": 1.60}] * 8 + [{"with": 0.95, "without": 1.0}] * 40, t["gain_min"], t["loss_max"])
+    assert (weak["refused"], weak["rate"], weak["met"]) == (40, 0.8333, False)
+    assert I.control_reading([], 0.5, 0.9) is None and I.control_reading(None, 0.5, 0.9) is None
+    exact = I.control_reading([{"with": 0.95, "without": 1.0}] * 9 + [{"with": 0.80, "without": 1.60}], t["gain_min"], t["loss_max"])
+    assert exact["rate"] == 0.9 and exact["met"] is True

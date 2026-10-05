@@ -111,3 +111,108 @@ def test_output_feature_is_the_mean_over_its_windows(tmp_path):
     assert np.allclose(feat, np.mean(np.stack(singles), axis=0))
     with pytest.raises(G.GradientUnavailable):
         G.output_feature(m, meta, [])
+
+
+class FakeNet:
+    """An adapter whose strength scales the decoder's learned parameters."""
+    def __init__(self, decoder):
+        self.decoder, self.set_to = decoder, []
+        self.scale, self.bias = decoder.scale.data.clone(), decoder.bias.data.clone()
+
+    def set_multiplier(self, value):
+        self.set_to.append(value)
+        self.decoder.scale.data = self.scale * value
+        self.decoder.bias.data = self.bias * value
+
+
+def test_a_pairs_loss_is_the_fixed_forward_mean_over_timesteps_and_takes_no_gradient():
+    module, sample = FakeModule(), _sample(3)
+    loss = G.pair_loss(module, sample, timesteps=[0.25, 0.75], noise_seed=5)
+    noise = torch.randn(sample["target_latents"].shape, generator=torch.Generator().manual_seed(5), dtype=torch.float32)
+    x0 = sample["target_latents"]
+    expected = []
+    for t in (0.25, 0.75):
+        out = module.model.decoder(hidden_states=(t * noise + (1 - t) * x0).unsqueeze(0), timestep=torch.full((1,), t),
+                                   timestep_r=torch.full((1,), t), attention_mask=None,
+                                   encoder_hidden_states=sample["encoder_hidden_states"].unsqueeze(0),
+                                   encoder_attention_mask=None, context_latents=sample["context_latents"].unsqueeze(0))[0]
+        expected.append(float(torch.nn.functional.mse_loss(out.squeeze(0), noise - x0)))
+    assert loss == pytest.approx(sum(expected) / 2, rel=1e-6)
+    assert G.pair_loss(module, sample, timesteps=[0.25, 0.75], noise_seed=5) == loss
+    assert G.pair_loss(module, sample, timesteps=[0.25, 0.75], noise_seed=6) != loss
+    assert all(p.grad is None for p in module.model.decoder.parameters())
+    assert not any(c["training"] for c in module.model.decoder.calls[:2]) and module.model.decoder.training
+    with pytest.raises(ValueError):
+        G.pair_loss(module, sample, timesteps=[], noise_seed=5)
+
+
+def test_an_outputs_loss_is_read_with_the_adapter_on_then_off_and_left_on(tmp_path):
+    module = FakeModule()
+    module.lycoris_net = FakeNet(module.model.decoder)
+    files = []
+    for i in (1, 2):
+        path = tmp_path / f"out_seg_{i:03d}.pt"
+        torch.save(_sample(i), path)
+        files.append(path)
+    meta = {"timesteps": [0.25, 0.75], "noise_seed": 9}
+    both = G.paired_loss(module, meta, files)
+    per = [G.pair_loss(module, G.load_sample(f), timesteps=[0.25, 0.75], noise_seed=G.pair_noise_seed(9, f.name)) for f in files]
+    assert both["with"] == pytest.approx(sum(per) / 2) and both["with"] == G.output_loss(module, meta, files)
+    assert both["without"] != both["with"] and module.lycoris_net.set_to[:3] == [1.0, 0.0, 1.0]
+    module.lycoris_net.set_multiplier(0.0)
+    assert G.output_loss(module, meta, files) == pytest.approx(both["without"])
+    module.lycoris_net.set_multiplier(1.0)
+    boom = FakeModule()
+    boom.lycoris_net = FakeNet(boom.model.decoder)
+    real, seen = G.output_loss, []
+
+    def fails_with_the_adapter_off(module, meta, files):
+        seen.append(module.lycoris_net.set_to[-1])
+        if seen[-1] == 0.0:
+            raise G.GradientUnavailable("lost mid-measurement")
+        return real(module, meta, files)
+    G.output_loss = fails_with_the_adapter_off
+    try:
+        with pytest.raises(G.GradientUnavailable, match="lost mid-measurement"):
+            G.paired_loss(boom, meta, files)
+    finally:
+        G.output_loss = real
+    assert seen == [1.0, 0.0] and boom.lycoris_net.set_to[-1] == 1.0, "a measurement that fails with the adapter off still leaves it on"
+    decomposed = FakeModule()
+    decomposed.lycoris_net = FakeNet(decomposed.model.decoder)
+    decomposed.lycoris_net.loras = [type("Layer", (), {"wd": True})()]
+    with pytest.raises(G.GradientUnavailable, match="weight-decomposed"):
+        G.paired_loss(decomposed, meta, files)
+    assert decomposed.lycoris_net.set_to == []
+    with pytest.raises(G.GradientUnavailable, match="cannot be switched off"):
+        G.paired_loss(FakeModule(), meta, files)
+
+
+def test_the_rooms_one_call_reads_the_rule_measures_only_when_it_can_and_refuses_by_raising(tmp_path):
+    from khaos_attribution import influence as I
+    module = FakeModule()
+    module.lycoris_net = FakeNet(module.model.decoder)
+    path = tmp_path / "out_seg_000.pt"
+    torch.save(_sample(1), path)
+    meta = {"timesteps": [0.25, 0.75], "noise_seed": 9}
+    both = G.paired_loss(module, meta, [path])
+    gain = both["without"] - both["with"]
+    module.lycoris_net.set_to.clear()
+    unread = I.read_abstention(None, module, meta, [path])
+    assert unread["checked"] is False and module.lycoris_net.set_to == [], "nothing is measured for a rule that cannot be read"
+    numbers = {"gain_min": gain - 1.0, "loss_max": both["with"] + 1.0, "device": "cpu", "compute_dtype": "fp32", "render_seconds": 30}
+    ok = I.read_abstention(numbers, module, meta, [path], duration_sec=30)
+    assert ok["accepted"] is True and ok["gain"] == pytest.approx(gain, abs=1e-5) and module.lycoris_net.set_to[-1] == 1.0
+    with pytest.raises(I.NotAttributable) as refused:
+        I.read_abstention({**numbers, "gain_min": gain + 1.0}, module, meta, [path], duration_sec=30)
+    assert refused.value.reading["accepted"] is False
+    module.lycoris_net.set_to.clear()
+    long = I.read_abstention({**numbers, "gain_min": gain + 1.0}, module, meta, [path], duration_sec=200)
+    assert long["checked"] is False and module.lycoris_net.set_to == []
+    assert G.dtype_tag("torch.bfloat16") == "bf16" and G.dtype_tag(torch.float32) == "fp32" and G.dtype_tag("odd") == "odd"
+    # An adapter that cannot be switched off is not read, and is never refused for it.
+    fixed = FakeModule()
+    cannot = I.read_abstention({**numbers, "gain_min": gain + 1.0}, fixed, meta, [path], duration_sec=30)
+    assert cannot["checked"] is False and "cannot be switched off" in cannot["reason"]
+    other = I.read_abstention({**numbers, "gain_min": gain + 1.0, "index_sha256": "abc"}, module, meta, [path], duration_sec=30, index_sha256="rebuilt")
+    assert other["checked"] is False and "another influence index" in other["reason"]

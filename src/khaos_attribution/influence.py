@@ -55,8 +55,42 @@ BASE_CAVEAT = (
     "explains, read by the D-TRAK kernel over the adapter's gradient index.")
 
 
+ABSTENTION_SCHEMA = "khaos.abstention/0.1.0"
+# The rule's two numbers are these percentiles of the adapter's own outputs: about one in twenty is refused.
+ABSTENTION_GAIN_PERCENTILE = 2.5
+ABSTENTION_LOSS_PERCENTILE = 97.5
+ABSTENTION_MIN_OUTPUTS = 40
+# The share of base-model outputs the test's rule refused at the least: each adapter's own control is read against it.
+ABSTENTION_CONTROL_BAR = 0.9
+# The numbers are read only for outputs within this band of the length they were taken at. Measured on one
+# adapter at one, two and three times that length, where they held; shorter and longer are unmeasured.
+ABSTENTION_LENGTH_BAND = (0.5, 3.0)
+ABSTENTION_VALIDATION = {
+    "test": "T7 by loss: the adapter's own outputs accepted, the base model's and another adapter's refused, pre-registered",
+    "catalogue": "chris_green_dataset_theleap",
+    "own_accepted": [116, 120],
+    "base_refused": [119, 120],
+    "other_adapter_refused": [115, 120],
+    "record_content_hash": "a47e34ce8f7aebe2",
+    "record_commit": "1a2e39e",
+    "standing": "confirmatory",
+    "scope": "one adapter on one device, 30-second outputs scored under the caption they were rendered with; "
+             "re-encoded or trimmed files and adapters trained on overlapping material are untested",
+}
+NOT_ATTRIBUTABLE = ("Not attributable: this adapter does not explain this output clearly better than the base "
+                    "model does, so no share is given to any track.")
+
+
 class InfluenceRefused(ValueError):
     """The index or the query cannot be scored, with the reason."""
+
+
+class NotAttributable(InfluenceRefused):
+    """The adapter's own loss says it did not shape this output: no percentage is given."""
+
+    def __init__(self, reading: Mapping):
+        super().__init__(NOT_ATTRIBUTABLE)
+        self.reading = dict(reading)
 
 
 @dataclass
@@ -136,6 +170,142 @@ def shares(totals: Mapping[str, float]) -> dict:
     pos = {t: max(0.0, float(v)) for t, v in totals.items()}
     s = sum(pos.values())
     return {t: (v / s if s > 0 else 0.0) for t, v in pos.items()}
+
+
+def abstention_thresholds(losses: Sequence[Mapping], *, device: str, compute_dtype: str,
+                          control: Sequence[Mapping] | None = None, **measured_on) -> dict:
+    """The rule's two numbers from an adapter's own outputs, each ``{"with", "without"}``: the low
+    percentile of the gain and the high percentile of the loss with the adapter, to four places.
+    ``control`` is the base model's outputs measured the same way: how many the numbers refuse."""
+    rows = [(float(r["without"]) - float(r["with"]), float(r["with"])) for r in losses
+            if r.get("with") is not None and r.get("without") is not None
+            and np.isfinite(r["with"]) and np.isfinite(r["without"])]
+    if len(rows) < ABSTENTION_MIN_OUTPUTS:
+        raise InfluenceRefused(f"the abstention rule needs {ABSTENTION_MIN_OUTPUTS} measured outputs of the adapter's "
+                               f"own, not {len(rows)}")
+    gains, with_adapter = [g for g, _ in rows], [w for _, w in rows]
+    gain_min = round(float(np.percentile(gains, ABSTENTION_GAIN_PERCENTILE)), 4)
+    loss_max = round(float(np.percentile(with_adapter, ABSTENTION_LOSS_PERCENTILE)), 4)
+    return {"schema": ABSTENTION_SCHEMA, "gain_min": gain_min, "loss_max": loss_max, "n_outputs": len(rows),
+            "own_accepted": sum(1 for g, w in rows if accepts(g, w, gain_min, loss_max)),
+            "gain_percentile": ABSTENTION_GAIN_PERCENTILE, "loss_percentile": ABSTENTION_LOSS_PERCENTILE,
+            "device": str(device), "compute_dtype": str(compute_dtype), **measured_on,
+            "control": control_reading(control, gain_min, loss_max),
+            "validation": dict(ABSTENTION_VALIDATION)}
+
+
+def control_reading(control: Sequence[Mapping] | None, gain_min: float, loss_max: float) -> dict | None:
+    """How the two numbers treat base-model outputs of the same prompts: the adapter's own proof
+    that its check tells its outputs from the base model's. None when no control was measured."""
+    rows = [(float(r["without"]) - float(r["with"]), float(r["with"])) for r in (control or [])
+            if r.get("with") is not None and r.get("without") is not None
+            and np.isfinite(r["with"]) and np.isfinite(r["without"])]
+    if not rows:
+        return None
+    refused = sum(1 for g, w in rows if not accepts(g, w, gain_min, loss_max))
+    rate = refused / len(rows)
+    return {"n": len(rows), "refused": refused, "rate": round(rate, 4), "bar": ABSTENTION_CONTROL_BAR,
+            "met": rate >= ABSTENTION_CONTROL_BAR}
+
+
+def accepts(gain: float | None, loss_with: float | None, gain_min: float, loss_max: float) -> bool:
+    """The rule on one output: the adapter explains it better than the base model by more than the gain, and well enough."""
+    return gain is not None and loss_with is not None and gain > gain_min and loss_with < loss_max
+
+
+def abstention_unreadable(thresholds: Mapping | None, *, device_type: str, compute_dtype: str,
+                          duration_sec: float | None = None, index_sha256: str | None = None) -> str | None:
+    """Why the rule cannot be read for this output on this machine, or None when it can: an adapter
+    published without its two numbers, numbers taken beside another index, another kind of device or
+    precision than they were taken on, or an output much shorter or longer than the outputs they came from."""
+    if not thresholds or thresholds.get("gain_min") is None or thresholds.get("loss_max") is None:
+        return ("this adapter was published without the two numbers the check needs; build its influence "
+                "index again at Publish")
+    if index_sha256 and thresholds.get("index_sha256") and thresholds["index_sha256"] != index_sha256:
+        return "its two numbers were taken beside another influence index; build the index again at Publish"
+    taken_on = str(thresholds.get("device") or "").split(":")[0]
+    if taken_on != str(device_type).split(":")[0]:
+        return (f"its two numbers were taken on {taken_on or 'an unrecorded device'}, and this machine "
+                f"scores on {device_type}")
+    if str(thresholds.get("compute_dtype")) != str(compute_dtype):
+        return (f"its two numbers were taken at {thresholds.get('compute_dtype')} precision, and this machine "
+                f"scores at {compute_dtype}")
+    taken_at = thresholds.get("render_seconds")
+    if taken_at and duration_sec is not None:
+        low, high = (float(taken_at) * b for b in ABSTENTION_LENGTH_BAND)
+        if not low <= float(duration_sec) <= high:
+            return (f"its two numbers were taken on {float(taken_at):g}-second outputs, and this one is "
+                    f"{float(duration_sec):.0f} seconds")
+    return None
+
+
+def abstention_reading(thresholds: Mapping | None, losses: Mapping | None, *, device_type: str,
+                       compute_dtype: str, duration_sec: float | None = None,
+                       index_sha256: str | None = None) -> dict:
+    """The rule read for one output from its two losses, or why it was not read."""
+    def unchecked(reason: str) -> dict:
+        return {"checked": False, "accepted": None, "reason": reason}
+    why = abstention_unreadable(thresholds, device_type=device_type, compute_dtype=compute_dtype,
+                                duration_sec=duration_sec, index_sha256=index_sha256)
+    if why:
+        return unchecked(why)
+    on, off = (losses or {}).get("with"), (losses or {}).get("without")
+    if on is None or off is None or not (np.isfinite(on) and np.isfinite(off)):
+        return unchecked("the output's loss could not be measured")
+    gain = float(off) - float(on)
+    return {"checked": True, "accepted": accepts(gain, float(on), float(thresholds["gain_min"]),
+                                                 float(thresholds["loss_max"])),
+            "gain": round(gain, 6), "loss_with": round(float(on), 6), "loss_without": round(float(off), 6),
+            "gain_min": float(thresholds["gain_min"]), "loss_max": float(thresholds["loss_max"]), "reason": None}
+
+
+def read_abstention(thresholds: Mapping | None, module, index_meta: Mapping, files: Sequence, *,
+                    duration_sec: float | None = None, index_sha256: str | None = None) -> dict:
+    """The rule read for one output on a live module, the one call both rooms' scorers make. Its two
+    losses are measured only when the numbers can be used here; a refused output raises ``NotAttributable``."""
+    from khaos_attribution import gradient as G  # noqa: PLC0415
+    here = {"device_type": str(module.device_type), "compute_dtype": G.dtype_tag(module.dtype),
+            "duration_sec": duration_sec, "index_sha256": index_sha256}
+    if abstention_unreadable(thresholds, **here):
+        losses = None
+    else:
+        try:
+            losses = G.paired_loss(module, index_meta, list(files))
+        except G.GradientUnavailable as exc:
+            # An adapter that cannot be switched off is not read; it is never refused for it.
+            return {"checked": False, "accepted": None, "reason": str(exc)}
+    reading = abstention_reading(thresholds, losses, **here)
+    if reading["checked"] and not reading["accepted"]:
+        raise NotAttributable(reading)
+    return reading
+
+
+REFUSAL_KIND = "not_attributable"
+
+
+def refusal_record(generation_id: str, reading: Mapping, index_meta: Mapping) -> dict:
+    """What is kept beside an output the rule refused: the reading, and the index it was read under."""
+    return {"generation_id": str(generation_id), REFUSAL_KIND: True, "reason": NOT_ATTRIBUTABLE,
+            "reading": dict(reading), "index_sha256": index_meta.get("index_sha256"),
+            "adapter_sha256": index_meta.get("adapter_sha256"),
+            "refused_at_utc": datetime.now(timezone.utc).isoformat()}
+
+
+def refusal_stands(record: Mapping | None, index_meta: Mapping | None) -> bool:
+    """Whether a kept refusal still answers for its output. It stops only when the adapter it was read
+    for is served with an index or numbers it was not read under: only then can the output be read afresh."""
+    if not record or not record.get(REFUSAL_KIND):
+        return False
+    meta = index_meta or {}
+    if not meta or meta.get("adapter_sha256") != record.get("adapter_sha256"):
+        return True
+    numbers = meta.get("abstention") or {}
+    if numbers.get("gain_min") is None or numbers.get("loss_max") is None:
+        return True
+    reading = record.get("reading") or {}
+    return (meta.get("index_sha256") == record.get("index_sha256")
+            and numbers.get("gain_min") == reading.get("gain_min")
+            and numbers.get("loss_max") == reading.get("loss_max"))
 
 
 def writer_shares(track_shares: Mapping[str, float], rights_by_track: Mapping[str, dict] | None) -> dict:
@@ -223,14 +393,19 @@ def build_influence_estimate(*, generation_id: str, artist_id: str, adapter_vers
                              lam: float, lambda_multiple: float = LAMBDA_MULTIPLE,
                              dataset_hash: str | None = None, dataset_hash_note: str | None = None,
                              resemblance: Mapping | None = None,
-                             extra_caveats: Sequence[str] = ()) -> dict:
-    """Shares → ranges → money → a validated document with ``method.kind`` ``dtrak``."""
+                             extra_caveats: Sequence[str] = (), abstention: Mapping | None = None) -> dict:
+    """Shares → ranges → money → a validated document with ``method.kind`` ``dtrak``.
+    An output the abstention rule refuses is never given one."""
+    if abstention is not None and abstention.get("checked") and not abstention.get("accepted"):
+        raise NotAttributable(abstention)
     share = shares(track_totals)
     if not share:
         raise InfluenceRefused("no track totals to build an estimate from")
     if sum(share.values()) <= 0:
         raise InfluenceRefused("no training track has positive influence on this output; nothing to split")
     caveats = [BASE_CAVEAT, *extra_caveats]
+    if abstention is not None and not abstention.get("checked"):
+        caveats.append(f"Not checked for outputs this adapter did not shape: {abstention.get('reason')}.")
     if dataset_hash_note:
         caveats.append(dataset_hash_note)
     without_rights = [t for t in share if t not in rights]
@@ -289,6 +464,8 @@ def build_influence_estimate(*, generation_id: str, artist_id: str, adapter_vers
         "splits": splits,
         "caveats": caveats,
     }
+    if abstention is not None:
+        document["method"]["abstention"] = dict(abstention)
     if resemblance is not None:
         document["resemblance"] = dict(resemblance)
     return validate_attribution_estimate(document)

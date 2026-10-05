@@ -183,6 +183,88 @@ def pair_gradient(module: Any, sample: dict, *, timesteps: Sequence[float], nois
     return (total / float(len(ts))).numpy()
 
 
+def dtype_tag(dtype: Any) -> str:
+    """``torch.bfloat16`` → ``"bf16"``: the short name a precision is recorded under."""
+    name = str(dtype).replace("torch.", "")
+    return {"bfloat16": "bf16", "float16": "fp16", "float32": "fp32"}.get(name, name)
+
+
+def pair_loss(module: Any, sample: dict, *, timesteps: Sequence[float], noise_seed: int) -> float:
+    """The flow-matching loss of one pair, the mean over ``timesteps``: the
+    trainer's forward with the randomness removed and no gradient taken."""
+    import torch  # noqa: PLC0415
+    from contextlib import nullcontext  # noqa: PLC0415
+
+    ts = [float(t) for t in timesteps]
+    if not ts:
+        raise ValueError("pair_loss needs at least one timestep")
+    dev, dtype = module.device, module.dtype
+    x0_cpu = sample["target_latents"]
+    gen = torch.Generator(device="cpu").manual_seed(int(noise_seed))
+    noise = torch.randn(x0_cpu.shape, generator=gen, dtype=torch.float32)
+    target = noise - x0_cpu.to(torch.float32)
+    x0 = x0_cpu.unsqueeze(0).to(dev, dtype=dtype)
+    x1 = noise.unsqueeze(0).to(dev, dtype=dtype)
+    attention_mask = sample["attention_mask"].unsqueeze(0).to(dev, dtype=dtype)
+    ehs = sample["encoder_hidden_states"].unsqueeze(0).to(dev, dtype=dtype)
+    eam = sample["encoder_attention_mask"].unsqueeze(0).to(dev, dtype=dtype)
+    ctx = sample["context_latents"].unsqueeze(0).to(dev, dtype=dtype)
+    decoder = module.model.decoder
+    was_training = bool(getattr(decoder, "training", True))
+    if hasattr(decoder, "eval"):
+        decoder.eval()
+    total = 0.0
+    try:
+        for t in ts:
+            tt = torch.full((1,), t, device=dev, dtype=dtype)
+            t_ = tt.unsqueeze(-1).unsqueeze(-1)
+            xt = t_ * x1 + (1.0 - t_) * x0
+            if module.device_type in ("cuda", "xpu", "mps") and dtype != torch.float32:
+                ctx_mgr = torch.autocast(device_type=module.device_type, dtype=dtype)
+            else:
+                ctx_mgr = nullcontext()
+            with torch.no_grad(), ctx_mgr:
+                out = decoder(hidden_states=xt, timestep=tt, timestep_r=tt, attention_mask=attention_mask,
+                              encoder_hidden_states=ehs, encoder_attention_mask=eam, context_latents=ctx)
+            pred = out[0].squeeze(0).detach().to("cpu", torch.float32)
+            total += float(torch.nn.functional.mse_loss(pred, target))
+    finally:
+        if was_training and hasattr(decoder, "train"):
+            decoder.train()
+    return total / float(len(ts))
+
+
+def output_loss(module: Any, meta: dict, files: Sequence[Path | str]) -> float:
+    """An output's loss under the module's current weights: the mean over its
+    windows, at the index's timesteps and per-pair noise seeds."""
+    timesteps = [float(t) for t in meta["timesteps"]]
+    noise_seed = int(meta["noise_seed"])
+    losses = [pair_loss(module, load_sample(p), timesteps=timesteps,
+                        noise_seed=pair_noise_seed(noise_seed, Path(p).name)) for p in files]
+    if not losses:
+        raise GradientUnavailable("an output needs at least one preprocessed window")
+    return float(np.mean(losses))
+
+
+def paired_loss(module: Any, meta: dict, files: Sequence[Path | str]) -> dict:
+    """An output's loss with the adapter at full strength and with it switched
+    off, on the same timesteps and noise. The base model is read, never rendered."""
+    net = getattr(module, "lycoris_net", None)
+    if net is None or not hasattr(net, "set_multiplier"):
+        raise GradientUnavailable("this module's adapter cannot be switched off for a measurement")
+    # A weight-decomposed adapter at multiplier 0 is still not the base model.
+    if any(getattr(layer, "wd", False) for layer in getattr(net, "loras", ())):
+        raise GradientUnavailable("a weight-decomposed adapter cannot be switched off for a measurement")
+    try:
+        net.set_multiplier(1.0)
+        with_adapter = output_loss(module, meta, files)
+        net.set_multiplier(0.0)
+        without = output_loss(module, meta, files)
+    finally:
+        net.set_multiplier(1.0)
+    return {"with": with_adapter, "without": without}
+
+
 def output_feature(module: Any, meta: dict, files: Sequence[Path | str], *,
                    params: Sequence[Any] | None = None) -> np.ndarray:
     """An output's feature: the mean projected gradient over its windows, at
