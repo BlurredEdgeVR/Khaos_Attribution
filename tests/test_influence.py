@@ -342,3 +342,33 @@ def test_an_unreadable_calibration_leaves_the_kernel_alone_and_says_why(tmp_path
     assert I.CALIBRATED_CAVEAT not in doc["caveats"]
     plain = _doc(tmp_path)
     assert "calibration" not in plain["method"] and plain["method"]["calibrated"] is False
+
+
+def test_a_calibration_needs_its_own_validation_a_sane_error_and_the_right_artist(tmp_path):
+    """Without a validation number, with a bad error, or from another artist, the kernel alone answers."""
+    for block, words in [
+        (_calibration(validation=None), "no validation"),
+        (_calibration(validation={"test": "x"}), "no validation"),
+        (_calibration(measured_error_pp="2.6"), "not a number of points"),
+        (_calibration(measured_error_pp=-1), "not a number of points"),
+        (_calibration(measured_error_pp=0), "not a number of points"),
+        (_calibration(measured_error_pp=float("nan")), "not a number of points"),
+        (_calibration(measured_error_pp=True), "not a number of points"),
+        (_calibration(artist_id="other"), "is other's, not art's"),
+        (["not", "a", "record"], "not a record"),
+    ]:
+        r = I.read_calibration(block, index_tracks=["ta"], artist_id="art")
+        assert not r["applied"] and words in r["reason"], (block, r)
+    assert I.read_calibration(_calibration(artist_id="art"), index_tracks=["ta"], artist_id="art")["applied"]
+    assert I.read_calibration(_calibration(measured_error_pp=None), index_tracks=["ta"])["applied"]
+    doc = _doc(tmp_path, calibration=_calibration(measured_error_pp=None))
+    assert doc["method"]["calibrated"] and doc["method"]["measured_error_pp"] == I.MEASURED_ERROR_PP
+    other = _doc(tmp_path, calibration=_calibration(artist_id="other"))
+    assert other["method"]["calibrated"] is False and "is other's" in other["method"]["calibration"]["reason"]
+
+
+def test_factors_of_zero_on_every_named_track_refuse_with_the_true_reason(tmp_path):
+    with pytest.raises(I.InfluenceRefused, match="factor of zero"):
+        _doc(tmp_path, calibration=_calibration(factors={"ta": 0.0, "tb": 0.0}))
+    doc = _doc(tmp_path, calibration=_calibration(factors={"ta": 0.0, "tb": 1.0}))
+    assert {t["track_id"]: t["blended_share_pct"] for t in doc["influence"]}["tb"] == 100.0

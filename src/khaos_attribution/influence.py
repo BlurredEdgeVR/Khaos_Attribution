@@ -191,14 +191,25 @@ def calibrated_shares(totals: Mapping[str, float], factors: Mapping[str, float])
     return {t: v / total for t, v in sorted(scaled.items())}
 
 
-def read_calibration(block: Mapping | None, *, index_tracks: Sequence[str]) -> dict:
-    """Whether an index's calibration block is applied, and why not: it must carry the schema,
-    finite non-negative factors fitted on enough outputs, and at least one factor for a track the
-    index holds."""
+def read_calibration(block: Mapping | None, *, index_tracks: Sequence[str], artist_id: str | None = None) -> dict:
+    """Whether an index's calibration block is applied, and why not: it must be this artist's, carry the
+    schema, finite non-negative factors fitted on enough outputs, its own validation and a sane error,
+    and at least one factor for a track the index holds."""
     if not block:
         return {"applied": False, "reason": "no calibration: the kernel alone"}
+    if not isinstance(block, Mapping):
+        return {"applied": False, "reason": "calibration is not a record"}
     if block.get("schema") != CALIBRATION_SCHEMA:
         return {"applied": False, "reason": f"calibration schema {block.get('schema')!r} is not {CALIBRATION_SCHEMA}"}
+    if artist_id is not None and block.get("artist_id") not in (None, artist_id):
+        return {"applied": False, "reason": f"calibration is {block.get('artist_id')}'s, not {artist_id}'s"}
+    validation = block.get("validation")
+    if not isinstance(validation, Mapping) or not isinstance(validation.get("money_on_the_right_tracks"), (int, float)):
+        return {"applied": False, "reason": "calibration carries no validation of its own"}
+    err = block.get("measured_error_pp")
+    if err is not None and not (isinstance(err, (int, float)) and not isinstance(err, bool)
+                                and np.isfinite(float(err)) and 0 < float(err) <= 50):
+        return {"applied": False, "reason": f"calibration's measured error {err!r} is not a number of points between 0 and 50"}
     factors = block.get("factors")
     if not isinstance(factors, Mapping) or not factors:
         return {"applied": False, "reason": "calibration carries no factors"}
@@ -445,8 +456,10 @@ def build_influence_estimate(*, generation_id: str, artist_id: str, adapter_vers
     calibration block gives calibrated shares and cites that block's own validation."""
     if abstention is not None and abstention.get("checked") and not abstention.get("accepted"):
         raise NotAttributable(abstention)
-    cal = read_calibration(calibration, index_tracks=index.track_ids)
+    cal = read_calibration(calibration, index_tracks=index.track_ids, artist_id=artist_id)
     share = calibrated_shares(track_totals, cal["factors"]) if cal["applied"] else shares(track_totals)
+    if cal["applied"] and not share and any(v > 0 for v in shares(track_totals).values()):
+        raise InfluenceRefused("the calibration gives every track the kernel named a factor of zero; nothing to split")
     if not share:
         raise InfluenceRefused("no track totals to build an estimate from")
     if sum(share.values()) <= 0:
