@@ -272,3 +272,73 @@ def test_an_adapters_own_control_says_how_many_base_outputs_its_numbers_refuse()
     assert I.control_reading([], 0.5, 0.9) is None and I.control_reading(None, 0.5, 0.9) is None
     exact = I.control_reading([{"with": 0.95, "without": 1.0}] * 9 + [{"with": 0.80, "without": 1.60}], t["gain_min"], t["loss_max"])
     assert exact["rate"] == 0.9 and exact["met"] is True
+
+
+def _calibration(**over):
+    block = {"schema": I.CALIBRATION_SCHEMA, "factors": {"ta": 0.5, "tb": 2.0}, "fit_outputs": 80,
+             "fitted_on": {"record": "payment_test_v2.calibrated.x.json", "content_hash": "abc"},
+             "validation": {"test": "T2 v2 calibrated", "money_on_the_right_tracks": 0.879, "kernel_alone": 0.811},
+             "measured_error_pp": 2.6}
+    block.update(over)
+    return block
+
+
+def test_calibrated_shares_scale_each_track_by_its_factor_and_renormalise():
+    """A factor of 0.5 on the kernel's 0.75 share and 2.0 on its 0.25 share meet in the middle."""
+    assert I.calibrated_shares({"ta": 3.0, "tb": 1.0, "tc": -0.5}, {"ta": 0.5, "tb": 2.0}) == \
+        {"ta": pytest.approx(0.375 / 0.875), "tb": pytest.approx(0.5 / 0.875), "tc": 0.0}
+    # A track without a factor keeps the kernel's own weight; nothing named is nothing split.
+    assert I.calibrated_shares({"ta": 1.0, "tb": 1.0}, {"ta": 1.0}) == {"ta": 0.5, "tb": 0.5}
+    assert I.calibrated_shares({"ta": 0.0, "tb": -1.0}, {"ta": 2.0}) == {}
+    assert I.calibrated_shares({"ta": 1.0}, {"ta": 0.0}) == {}
+
+
+def test_a_calibration_block_is_read_only_when_it_is_whole():
+    """Each defect names itself; the kernel alone is the answer to every one."""
+    ok = I.read_calibration(_calibration(), index_tracks=["ta", "tb", "tc"])
+    assert ok["applied"] and ok["factors"] == {"ta": 0.5, "tb": 2.0} and ok["reason"] is None
+    cases = [
+        (None, "no calibration"),
+        (_calibration(schema="khaos.other/1.0"), "schema"),
+        (_calibration(factors={}), "no factors"),
+        (_calibration(factors={"ta": -0.1}), "negative or not finite"),
+        (_calibration(factors={"ta": float("nan")}), "negative or not finite"),
+        (_calibration(factors={"ta": "big"}), "not a number"),
+        (_calibration(fit_outputs=59), "under 60"),
+        (_calibration(fit_outputs=None), "under 60"),
+        (_calibration(factors={"zz": 1.0}), "names a track this index holds"),
+    ]
+    for block, words in cases:
+        r = I.read_calibration(block, index_tracks=["ta", "tb", "tc"])
+        assert not r["applied"] and words in r["reason"], (block, r)
+
+
+def test_a_calibrated_document_splits_by_the_factors_and_cites_its_own_record(tmp_path):
+    """Calibrated shares are the money's shares; the validation, the error and the caveat are the block's."""
+    doc = _doc(tmp_path, calibration=_calibration())
+    by = {t["track_id"]: t for t in doc["influence"]}
+    assert by["ta"]["influence_share_pct"] == by["ta"]["blended_share_pct"] == pytest.approx(42.86, abs=0.01)
+    assert by["tb"]["blended_share_pct"] == pytest.approx(57.14, abs=0.01)
+    assert doc["splits"]["writers"][0]["name"] == "W2"
+    m = doc["method"]
+    assert m["kind"] == "dtrak" and m["calibrated"] is True and m["measured_error_pp"] == 2.6
+    assert m["validation"]["money_on_the_right_tracks"] == 0.879
+    assert m["calibration"]["factors"] == {"ta": 0.5, "tb": 2.0}
+    assert m["calibration"]["fitted_on"]["content_hash"] == "abc" and m["calibration"]["fit_outputs"] == 80
+    assert m["calibration"]["kernel_shares"]["ta"] == 0.75
+    assert I.CALIBRATED_CAVEAT in doc["caveats"]
+    assert by["ta"]["share_range_pct"] == [pytest.approx(40.26, abs=0.01), pytest.approx(45.46, abs=0.01)]
+
+
+def test_an_unreadable_calibration_leaves_the_kernel_alone_and_says_why(tmp_path):
+    """A block that cannot be read changes no share, keeps the kernel's validation and is named in a caveat."""
+    doc = _doc(tmp_path, calibration=_calibration(fit_outputs=12))
+    by = {t["track_id"]: t for t in doc["influence"]}
+    assert by["ta"]["blended_share_pct"] == 75.0
+    assert doc["method"]["calibrated"] is False and doc["method"]["measured_error_pp"] == I.MEASURED_ERROR_PP
+    assert doc["method"]["validation"]["money_on_the_right_tracks"] == 0.802
+    assert doc["method"]["calibration"] == {"applied": False, "reason": "calibration fitted on 12 outputs, under 60"}
+    assert any(c.startswith("Calibration not applied: ") for c in doc["caveats"])
+    assert I.CALIBRATED_CAVEAT not in doc["caveats"]
+    plain = _doc(tmp_path)
+    assert "calibration" not in plain["method"] and plain["method"]["calibrated"] is False

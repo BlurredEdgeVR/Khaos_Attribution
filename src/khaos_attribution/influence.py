@@ -54,6 +54,14 @@ BASE_CAVEAT = (
     "Measured influence: how much of this output's adapter gradient each training track "
     "explains, read by the D-TRAK kernel over the adapter's gradient index.")
 
+CALIBRATION_SCHEMA = "khaos.influence_calibration/0.1.0"
+# One fixed factor per track, fitted once on outputs scored against the retraining ground truth: a track the
+# kernel habitually under- or over-weights is corrected by that much. Under this many fit outputs no factor is read.
+CALIBRATION_MIN_OUTPUTS = 60
+CALIBRATED_CAVEAT = (
+    "Calibrated: each track's share is the kernel's times one fixed factor for that track, fitted on this "
+    "catalogue's own retraining ground truth; nothing is fitted per output.")
+
 
 ABSTENTION_SCHEMA = "khaos.abstention/0.1.0"
 # The rule's two numbers are these percentiles of the adapter's own outputs: about one in twenty is refused.
@@ -170,6 +178,43 @@ def shares(totals: Mapping[str, float]) -> dict:
     pos = {t: max(0.0, float(v)) for t, v in totals.items()}
     s = sum(pos.values())
     return {t: (v / s if s > 0 else 0.0) for t, v in pos.items()}
+
+
+def calibrated_shares(totals: Mapping[str, float], factors: Mapping[str, float]) -> dict:
+    """The kernel's shares, each scaled by its track's factor and renormalised; a track without
+    a factor keeps the kernel's own weight; empty when the kernel names no track."""
+    kernel = shares(totals)
+    scaled = {t: v * float(factors.get(t, 1.0)) for t, v in kernel.items()}
+    total = sum(scaled.values())
+    if total <= 0:
+        return {}
+    return {t: v / total for t, v in sorted(scaled.items())}
+
+
+def read_calibration(block: Mapping | None, *, index_tracks: Sequence[str]) -> dict:
+    """Whether an index's calibration block is applied, and why not: it must carry the schema,
+    finite non-negative factors fitted on enough outputs, and at least one factor for a track the
+    index holds."""
+    if not block:
+        return {"applied": False, "reason": "no calibration: the kernel alone"}
+    if block.get("schema") != CALIBRATION_SCHEMA:
+        return {"applied": False, "reason": f"calibration schema {block.get('schema')!r} is not {CALIBRATION_SCHEMA}"}
+    factors = block.get("factors")
+    if not isinstance(factors, Mapping) or not factors:
+        return {"applied": False, "reason": "calibration carries no factors"}
+    try:
+        bad = [t for t, v in factors.items() if not (float(v) >= 0.0 and np.isfinite(float(v)))]
+    except (TypeError, ValueError):
+        return {"applied": False, "reason": "a calibration factor is not a number"}
+    if bad:
+        return {"applied": False, "reason": f"calibration factors for {len(bad)} track(s) are negative or not finite"}
+    n = block.get("fit_outputs")
+    if not isinstance(n, int) or n < CALIBRATION_MIN_OUTPUTS:
+        return {"applied": False, "reason": f"calibration fitted on {n} outputs, under {CALIBRATION_MIN_OUTPUTS}"}
+    held = set(index_tracks)
+    if not any(t in held for t in factors):
+        return {"applied": False, "reason": "no calibration factor names a track this index holds"}
+    return {"applied": True, "reason": None, "factors": {t: float(v) for t, v in factors.items()}}
 
 
 def abstention_thresholds(losses: Sequence[Mapping], *, device: str, compute_dtype: str,
@@ -393,17 +438,24 @@ def build_influence_estimate(*, generation_id: str, artist_id: str, adapter_vers
                              lam: float, lambda_multiple: float = LAMBDA_MULTIPLE,
                              dataset_hash: str | None = None, dataset_hash_note: str | None = None,
                              resemblance: Mapping | None = None,
-                             extra_caveats: Sequence[str] = (), abstention: Mapping | None = None) -> dict:
+                             extra_caveats: Sequence[str] = (), abstention: Mapping | None = None,
+                             calibration: Mapping | None = None) -> dict:
     """Shares → ranges → money → a validated document with ``method.kind`` ``dtrak``.
-    An output the abstention rule refuses is never given one."""
+    An output the abstention rule refuses is never given one; an index with a readable
+    calibration block gives calibrated shares and cites that block's own validation."""
     if abstention is not None and abstention.get("checked") and not abstention.get("accepted"):
         raise NotAttributable(abstention)
-    share = shares(track_totals)
+    cal = read_calibration(calibration, index_tracks=index.track_ids)
+    share = calibrated_shares(track_totals, cal["factors"]) if cal["applied"] else shares(track_totals)
     if not share:
         raise InfluenceRefused("no track totals to build an estimate from")
     if sum(share.values()) <= 0:
         raise InfluenceRefused("no training track has positive influence on this output; nothing to split")
     caveats = [BASE_CAVEAT, *extra_caveats]
+    if cal["applied"]:
+        caveats.append(CALIBRATED_CAVEAT)
+    elif calibration:
+        caveats.append(f"Calibration not applied: {cal['reason']}.")
     if abstention is not None and not abstention.get("checked"):
         caveats.append(f"Not checked for outputs this adapter did not shape: {abstention.get('reason')}.")
     if dataset_hash_note:
@@ -412,7 +464,8 @@ def build_influence_estimate(*, generation_id: str, artist_id: str, adapter_vers
     if without_rights:
         caveats.append(f"{len(without_rights)} of {len(share)} influencing tracks have no rights record; "
                        "their influence is reported as unattributed, not redistributed.")
-    err = MEASURED_ERROR_PP / 100.0
+    error_pp = float(calibration.get("measured_error_pp") or MEASURED_ERROR_PP) if cal["applied"] else MEASURED_ERROR_PP
+    err = error_pp / 100.0
     ranges = {t: (max(0.0, v - err), min(1.0, v + err)) for t, v in share.items()}
     splits = blend.money_splits(share, ranges, rights)
     pct = blend.largest_remainder_pcts(share)
@@ -457,8 +510,10 @@ def build_influence_estimate(*, generation_id: str, artist_id: str, adapter_vers
             "index_sha256": index_sha256,
             "adapter_sha256": adapter_sha256,
             "dataset_hash": dataset_hash,
-            "measured_error_pp": MEASURED_ERROR_PP,
-            "validation": dict(VALIDATION),
+            "measured_error_pp": error_pp,
+            "validation": dict(calibration["validation"]) if cal["applied"] and calibration.get("validation")
+            else dict(VALIDATION),
+            "calibrated": bool(cal["applied"]),
         },
         "influence": influence,
         "splits": splits,
@@ -466,6 +521,13 @@ def build_influence_estimate(*, generation_id: str, artist_id: str, adapter_vers
     }
     if abstention is not None:
         document["method"]["abstention"] = dict(abstention)
+    if cal["applied"]:
+        document["method"]["calibration"] = {
+            "schema": calibration.get("schema"), "factors": cal["factors"],
+            "fitted_on": dict(calibration.get("fitted_on") or {}), "fit_outputs": calibration.get("fit_outputs"),
+            "kernel_shares": shares(track_totals)}
+    elif calibration:
+        document["method"]["calibration"] = {"applied": False, "reason": cal["reason"]}
     if resemblance is not None:
         document["resemblance"] = dict(resemblance)
     return validate_attribution_estimate(document)
