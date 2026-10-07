@@ -304,6 +304,7 @@ def test_a_calibration_block_is_read_only_when_it_is_whole():
         (_calibration(factors={"ta": -0.1}), "negative or not finite"),
         (_calibration(factors={"ta": float("nan")}), "negative or not finite"),
         (_calibration(factors={"ta": "big"}), "not a number"),
+        (_calibration(factors={"ta": True}), "not a number"),
         (_calibration(fit_outputs=59), "under 60"),
         (_calibration(fit_outputs=None), "under 60"),
         (_calibration(factors={"zz": 1.0}), "names a track this index holds"),
@@ -337,7 +338,8 @@ def test_an_unreadable_calibration_leaves_the_kernel_alone_and_says_why(tmp_path
     assert by["ta"]["blended_share_pct"] == 75.0
     assert doc["method"]["calibrated"] is False and doc["method"]["measured_error_pp"] == I.MEASURED_ERROR_PP
     assert doc["method"]["validation"]["money_on_the_right_tracks"] == 0.802
-    assert doc["method"]["calibration"] == {"applied": False, "reason": "calibration fitted on 12 outputs, under 60"}
+    assert {k: v for k, v in doc["method"]["calibration"].items() if k != "block_sha256"} == \
+        {"applied": False, "reason": "calibration fitted on 12 outputs, under 60"}
     assert any(c.startswith("Calibration not applied: ") for c in doc["caveats"])
     assert I.CALIBRATED_CAVEAT not in doc["caveats"]
     plain = _doc(tmp_path)
@@ -383,7 +385,7 @@ def test_bad_loss_rows_are_skipped_or_unread_never_a_crash():
     assert th["n_outputs"] == 40 and th["control"]["n"] == 1
     r = I.abstention_reading(th, {"with": "x", "without": 1.0}, device_type="cpu", compute_dtype="fp32")
     assert r["checked"] is False and "could not be measured" in r["reason"]
-    with pytest.raises(I.InfluenceRefused, match="measured_on may not carry"):
+    with pytest.raises(TypeError, match="measured_on may not carry"):
         I.abstention_thresholds(good, device="cpu", compute_dtype="fp32", gain_min=99.0)
 
 
@@ -403,3 +405,12 @@ def test_a_calibrated_document_reports_coverage_and_reads_resemblance_against_it
     assert doc["resemblance"]["money_agreement_with_influence"] == pytest.approx(round(expect, 4))
     plain = _doc(tmp_path, resemblance=I.resemblance_block(clap, kernel))
     assert plain["resemblance"]["money_agreement_with_influence"] == pytest.approx(round(1 - 0.5 * (0.32 + 0.32), 4))
+
+
+def test_a_document_names_the_calibration_block_it_was_read_with_applied_or_not(tmp_path):
+    block = _calibration()
+    sha = I.calibration_sha256(block)
+    assert sha and sha == I.calibration_sha256(dict(block)) and I.calibration_sha256(None) is None
+    assert _doc(tmp_path, calibration=block)["method"]["calibration"]["block_sha256"] == sha
+    refused = _doc(tmp_path, calibration=_calibration(fit_outputs=3))
+    assert refused["method"]["calibration"]["applied"] is False and refused["method"]["calibration"]["block_sha256"] == I.calibration_sha256(_calibration(fit_outputs=3))

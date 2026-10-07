@@ -86,7 +86,7 @@ def build_estimate(*, generation_id: str, artist_id: str,
             f"holds {len(embeddings)} — the store/bundle is torn (files "
             f"copied at different times?). Refusing to estimate from it.")
     missing_rows = sorted(t for t, n in segment_counts.items() if n > 0 and t not in set(row_track_ids))
-    if missing_rows and len(segment_counts) > 1:
+    if missing_rows:
         raise ValueError(
             f"{len(missing_rows)} training track(s) have segments but no embedding rows — the store "
             "is torn the other way (counts ahead of the array). Refusing to estimate from it.")

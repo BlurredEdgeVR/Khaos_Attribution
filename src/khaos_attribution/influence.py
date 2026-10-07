@@ -191,6 +191,13 @@ def calibrated_shares(totals: Mapping[str, float], factors: Mapping[str, float])
     return {t: v / total for t, v in sorted(scaled.items())}
 
 
+def calibration_sha256(block: Mapping | None) -> str | None:
+    """The identity of a calibration block as written, so a document can say which one it was read with."""
+    if not block:
+        return None
+    return hashlib.sha256(json.dumps(block, sort_keys=True, default=str).encode()).hexdigest()
+
+
 def read_calibration(block: Mapping | None, *, index_tracks: Sequence[str], artist_id: str | None = None) -> dict:
     """Whether an index's calibration block is applied, and why not: it must be this artist's, carry the
     schema, finite non-negative factors fitted on enough outputs, its own validation and a sane error,
@@ -213,10 +220,9 @@ def read_calibration(block: Mapping | None, *, index_tracks: Sequence[str], arti
     factors = block.get("factors")
     if not isinstance(factors, Mapping) or not factors:
         return {"applied": False, "reason": "calibration carries no factors"}
-    try:
-        bad = [t for t, v in factors.items() if not (float(v) >= 0.0 and np.isfinite(float(v)))]
-    except (TypeError, ValueError):
+    if any(isinstance(v, bool) or not isinstance(v, (int, float)) for v in factors.values()):
         return {"applied": False, "reason": "a calibration factor is not a number"}
+    bad = [t for t, v in factors.items() if not (float(v) >= 0.0 and np.isfinite(float(v)))]
     if bad:
         return {"applied": False, "reason": f"calibration factors for {len(bad)} track(s) are negative or not finite"}
     n = block.get("fit_outputs")
@@ -258,7 +264,7 @@ def abstention_thresholds(losses: Sequence[Mapping], *, device: str, compute_dty
                 "device", "compute_dtype", "control", "validation"}
     clash = sorted(reserved & set(measured_on))
     if clash:
-        raise InfluenceRefused(f"measured_on may not carry the rule's own fields: {', '.join(clash)}")
+        raise TypeError(f"measured_on may not carry the rule's own fields: {', '.join(clash)}")
     return {**measured_on, "schema": ABSTENTION_SCHEMA, "gain_min": gain_min, "loss_max": loss_max,
             "n_outputs": len(rows), "own_accepted": sum(1 for g, w in rows if accepts(g, w, gain_min, loss_max)),
             "gain_percentile": ABSTENTION_GAIN_PERCENTILE, "loss_percentile": ABSTENTION_LOSS_PERCENTILE,
@@ -572,9 +578,10 @@ def build_influence_estimate(*, generation_id: str, artist_id: str, adapter_vers
         document["method"]["calibration"] = {
             "schema": calibration.get("schema"), "factors": cal["factors"], "coverage": cal["coverage"],
             "fitted_on": dict(calibration.get("fitted_on") or {}), "fit_outputs": calibration.get("fit_outputs"),
-            "kernel_shares": shares(track_totals)}
+            "kernel_shares": shares(track_totals), "block_sha256": calibration_sha256(calibration)}
     elif calibration:
-        document["method"]["calibration"] = {"applied": False, "reason": cal["reason"]}
+        document["method"]["calibration"] = {"applied": False, "reason": cal["reason"],
+                                             "block_sha256": calibration_sha256(calibration)}
     if resemblance is not None:
         document["resemblance"] = dict(resemblance)
     return validate_attribution_estimate(document)
