@@ -29,7 +29,8 @@ def largest_remainder_pcts(shares: dict[str, float]) -> dict[str, float]:
     Naive per-entry rounding drifts past the validator's sum tolerance at
     around 200 tracks; largest-remainder keeps the sum exact at any N.
     """
-    scaled = {t: v * 100 for t, v in shares.items()}
+    total = sum(shares.values())
+    scaled = {t: (v / total if total > 0 else 0.0) * 100 for t, v in shares.items()}
     floored = {t: math.floor(v * 10_000) / 10_000 for t, v in scaled.items()}
     residue = round((100 - sum(floored.values())) * 10_000)
     by_remainder = sorted(shares, key=lambda t: -(scaled[t] - floored[t]))

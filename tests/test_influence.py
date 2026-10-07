@@ -275,7 +275,7 @@ def test_an_adapters_own_control_says_how_many_base_outputs_its_numbers_refuse()
 
 
 def _calibration(**over):
-    block = {"schema": I.CALIBRATION_SCHEMA, "factors": {"ta": 0.5, "tb": 2.0}, "fit_outputs": 80,
+    block = {"schema": I.CALIBRATION_SCHEMA, "artist_id": "art", "factors": {"ta": 0.5, "tb": 2.0}, "fit_outputs": 80,
              "fitted_on": {"record": "payment_test_v2.calibrated.x.json", "content_hash": "abc"},
              "validation": {"test": "T2 v2 calibrated", "money_on_the_right_tracks": 0.879, "kernel_alone": 0.811},
              "measured_error_pp": 2.6}
@@ -360,6 +360,7 @@ def test_a_calibration_needs_its_own_validation_a_sane_error_and_the_right_artis
         r = I.read_calibration(block, index_tracks=["ta"], artist_id="art")
         assert not r["applied"] and words in r["reason"], (block, r)
     assert I.read_calibration(_calibration(artist_id="art"), index_tracks=["ta"], artist_id="art")["applied"]
+    assert "None's" in I.read_calibration(_calibration(artist_id=None), index_tracks=["ta"], artist_id="art")["reason"]
     assert I.read_calibration(_calibration(measured_error_pp=None), index_tracks=["ta"])["applied"]
     doc = _doc(tmp_path, calibration=_calibration(measured_error_pp=None))
     assert doc["method"]["calibrated"] and doc["method"]["measured_error_pp"] == I.MEASURED_ERROR_PP
@@ -372,3 +373,33 @@ def test_factors_of_zero_on_every_named_track_refuse_with_the_true_reason(tmp_pa
         _doc(tmp_path, calibration=_calibration(factors={"ta": 0.0, "tb": 0.0}))
     doc = _doc(tmp_path, calibration=_calibration(factors={"ta": 0.0, "tb": 1.0}))
     assert {t["track_id"]: t["blended_share_pct"] for t in doc["influence"]}["tb"] == 100.0
+
+
+def test_bad_loss_rows_are_skipped_or_unread_never_a_crash():
+    """A string or a NaN loss is not a loss: the thresholds skip the row, the reading says unmeasured."""
+    good = [{"with": 0.5 + i * 0.001, "without": 1.0} for i in range(40)]
+    bad = [{"with": "0.1", "without": 0.2}, {"with": float("nan"), "without": 1.0}, {"with": True, "without": 1.0}]
+    th = I.abstention_thresholds(good + bad, device="cpu", compute_dtype="fp32", control=bad + [{"with": 0.9, "without": 1.0}])
+    assert th["n_outputs"] == 40 and th["control"]["n"] == 1
+    r = I.abstention_reading(th, {"with": "x", "without": 1.0}, device_type="cpu", compute_dtype="fp32")
+    assert r["checked"] is False and "could not be measured" in r["reason"]
+    with pytest.raises(I.InfluenceRefused, match="measured_on may not carry"):
+        I.abstention_thresholds(good, device="cpu", compute_dtype="fp32", gain_min=99.0)
+
+
+def test_a_calibrated_document_reports_coverage_and_reads_resemblance_against_its_own_shares(tmp_path):
+    """Tracks the fit never covered are named and keep the kernel's weight; the resemblance block's
+    agreement is with the calibrated shares, not the kernel's."""
+    clap = {"method": {"estimator_version": "0.5.0", "similarity_informative": True},
+            "influence": [{"track_id": "ta", "blended_share_pct": 50.0, "similarity_share_pct": 43.0},
+                          {"track_id": "tb", "blended_share_pct": 50.0, "similarity_share_pct": 57.0}]}
+    kernel = I.shares({"ta": 3.0, "tb": 1.0, "tc": -0.5})
+    doc = _doc(tmp_path, calibration=_calibration(factors={"ta": 0.5}), resemblance=I.resemblance_block(clap, kernel))
+    cov = doc["method"]["calibration"]["coverage"]
+    assert cov == {"fitted": 1, "of": 3, "unfitted": ["tb", "tc"], "extra": []}
+    assert any("2 of this index's 3 tracks had no factor" in c for c in doc["caveats"])
+    shown = {t["track_id"]: t["blended_share_pct"] / 100 for t in doc["influence"]}
+    expect = 1 - 0.5 * (abs(shown["ta"] - 0.43) + abs(shown["tb"] - 0.57) + shown["tc"])
+    assert doc["resemblance"]["money_agreement_with_influence"] == pytest.approx(round(expect, 4))
+    plain = _doc(tmp_path, resemblance=I.resemblance_block(clap, kernel))
+    assert plain["resemblance"]["money_agreement_with_influence"] == pytest.approx(round(1 - 0.5 * (0.32 + 0.32), 4))

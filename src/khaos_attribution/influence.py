@@ -201,7 +201,7 @@ def read_calibration(block: Mapping | None, *, index_tracks: Sequence[str], arti
         return {"applied": False, "reason": "calibration is not a record"}
     if block.get("schema") != CALIBRATION_SCHEMA:
         return {"applied": False, "reason": f"calibration schema {block.get('schema')!r} is not {CALIBRATION_SCHEMA}"}
-    if artist_id is not None and block.get("artist_id") not in (None, artist_id):
+    if artist_id is not None and block.get("artist_id") != artist_id:
         return {"applied": False, "reason": f"calibration is {block.get('artist_id')}'s, not {artist_id}'s"}
     validation = block.get("validation")
     if not isinstance(validation, Mapping) or not isinstance(validation.get("money_on_the_right_tracks"), (int, float)):
@@ -225,7 +225,20 @@ def read_calibration(block: Mapping | None, *, index_tracks: Sequence[str], arti
     held = set(index_tracks)
     if not any(t in held for t in factors):
         return {"applied": False, "reason": "no calibration factor names a track this index holds"}
-    return {"applied": True, "reason": None, "factors": {t: float(v) for t, v in factors.items()}}
+    unfitted = sorted(held - set(factors))
+    return {"applied": True, "reason": None, "factors": {t: float(v) for t, v in factors.items()},
+            "coverage": {"fitted": len(held) - len(unfitted), "of": len(held), "unfitted": unfitted,
+                         "extra": sorted(set(factors) - held)}}
+
+
+def _finite_pair(row: Mapping) -> tuple[float, float] | None:
+    """``(loss with, loss without)`` when both are finite numbers, else None: a string or a NaN is not a loss."""
+    on, off = row.get("with"), row.get("without")
+    for v in (on, off):
+        if isinstance(v, bool) or not isinstance(v, (int, float, np.integer, np.floating)):
+            return None
+    on, off = float(on), float(off)
+    return (on, off) if np.isfinite(on) and np.isfinite(off) else None
 
 
 def abstention_thresholds(losses: Sequence[Mapping], *, device: str, compute_dtype: str,
@@ -233,19 +246,23 @@ def abstention_thresholds(losses: Sequence[Mapping], *, device: str, compute_dty
     """The rule's two numbers from an adapter's own outputs, each ``{"with", "without"}``: the low
     percentile of the gain and the high percentile of the loss with the adapter, to four places.
     ``control`` is the base model's outputs measured the same way: how many the numbers refuse."""
-    rows = [(float(r["without"]) - float(r["with"]), float(r["with"])) for r in losses
-            if r.get("with") is not None and r.get("without") is not None
-            and np.isfinite(r["with"]) and np.isfinite(r["without"])]
+    pairs = [_finite_pair(r) for r in losses]
+    rows = [(off - on, on) for pr in pairs if pr is not None for on, off in (pr,)]
     if len(rows) < ABSTENTION_MIN_OUTPUTS:
         raise InfluenceRefused(f"the abstention rule needs {ABSTENTION_MIN_OUTPUTS} measured outputs of the adapter's "
                                f"own, not {len(rows)}")
     gains, with_adapter = [g for g, _ in rows], [w for _, w in rows]
     gain_min = round(float(np.percentile(gains, ABSTENTION_GAIN_PERCENTILE)), 4)
     loss_max = round(float(np.percentile(with_adapter, ABSTENTION_LOSS_PERCENTILE)), 4)
-    return {"schema": ABSTENTION_SCHEMA, "gain_min": gain_min, "loss_max": loss_max, "n_outputs": len(rows),
-            "own_accepted": sum(1 for g, w in rows if accepts(g, w, gain_min, loss_max)),
+    reserved = {"schema", "gain_min", "loss_max", "n_outputs", "own_accepted", "gain_percentile", "loss_percentile",
+                "device", "compute_dtype", "control", "validation"}
+    clash = sorted(reserved & set(measured_on))
+    if clash:
+        raise InfluenceRefused(f"measured_on may not carry the rule's own fields: {', '.join(clash)}")
+    return {**measured_on, "schema": ABSTENTION_SCHEMA, "gain_min": gain_min, "loss_max": loss_max,
+            "n_outputs": len(rows), "own_accepted": sum(1 for g, w in rows if accepts(g, w, gain_min, loss_max)),
             "gain_percentile": ABSTENTION_GAIN_PERCENTILE, "loss_percentile": ABSTENTION_LOSS_PERCENTILE,
-            "device": str(device), "compute_dtype": str(compute_dtype), **measured_on,
+            "device": str(device), "compute_dtype": str(compute_dtype),
             "control": control_reading(control, gain_min, loss_max),
             "validation": dict(ABSTENTION_VALIDATION)}
 
@@ -253,9 +270,8 @@ def abstention_thresholds(losses: Sequence[Mapping], *, device: str, compute_dty
 def control_reading(control: Sequence[Mapping] | None, gain_min: float, loss_max: float) -> dict | None:
     """How the two numbers treat base-model outputs of the same prompts: the adapter's own proof
     that its check tells its outputs from the base model's. None when no control was measured."""
-    rows = [(float(r["without"]) - float(r["with"]), float(r["with"])) for r in (control or [])
-            if r.get("with") is not None and r.get("without") is not None
-            and np.isfinite(r["with"]) and np.isfinite(r["without"])]
+    pairs = [_finite_pair(r) for r in (control or [])]
+    rows = [(off - on, on) for pr in pairs if pr is not None for on, off in (pr,)]
     if not rows:
         return None
     refused = sum(1 for g, w in rows if not accepts(g, w, gain_min, loss_max))
@@ -305,10 +321,11 @@ def abstention_reading(thresholds: Mapping | None, losses: Mapping | None, *, de
                                 duration_sec=duration_sec, index_sha256=index_sha256)
     if why:
         return unchecked(why)
-    on, off = (losses or {}).get("with"), (losses or {}).get("without")
-    if on is None or off is None or not (np.isfinite(on) and np.isfinite(off)):
+    pair = _finite_pair(losses or {})
+    if pair is None:
         return unchecked("the output's loss could not be measured")
-    gain = float(off) - float(on)
+    on, off = pair
+    gain = off - on
     return {"checked": True, "accepted": accepts(gain, float(on), float(thresholds["gain_min"]),
                                                  float(thresholds["loss_max"])),
             "gain": round(gain, 6), "loss_with": round(float(on), 6), "loss_without": round(float(off), 6),
@@ -421,6 +438,17 @@ def resemblance_block(clap_document: Mapping, influence_shares: Mapping[str, flo
             "note": "resemblance to the training audio, not influence on this output"}
 
 
+def _agreement(block: Mapping, influence_shares: Mapping[str, float]) -> dict:
+    """The resemblance block's two agreement numbers read against the shares a document shows."""
+    clap = {t: float(v) / 100.0 for t, v in (block.get("shares_pct") or {}).items()}
+    tracks = sorted(set(influence_shares) | set(clap))
+    a = [float(influence_shares.get(t, 0.0)) for t in tracks]
+    b = [clap.get(t, 0.0) for t in tracks]
+    money = (1.0 - 0.5 * sum(abs(x - y) for x, y in zip(a, b))) if clap else None
+    return {"money_agreement_with_influence": (round(money, 4) if money is not None else None),
+            "rank_agreement_with_influence": (_spearman(a, b) if clap else None)}
+
+
 def _spearman(a: Sequence[float], b: Sequence[float]) -> float | None:
     x, y = np.asarray(a, dtype=np.float64), np.asarray(b, dtype=np.float64)
     if x.size < 3 or np.ptp(x) == 0 or np.ptp(y) == 0:
@@ -467,6 +495,10 @@ def build_influence_estimate(*, generation_id: str, artist_id: str, adapter_vers
     caveats = [BASE_CAVEAT, *extra_caveats]
     if cal["applied"]:
         caveats.append(CALIBRATED_CAVEAT)
+        cov = cal["coverage"]
+        if cov["unfitted"]:
+            caveats.append(f"{len(cov['unfitted'])} of this index's {cov['of']} tracks had no factor fitted and keep "
+                           "the kernel's own weight.")
     elif calibration:
         caveats.append(f"Calibration not applied: {cal['reason']}.")
     if abstention is not None and not abstention.get("checked"):
@@ -483,6 +515,8 @@ def build_influence_estimate(*, generation_id: str, artist_id: str, adapter_vers
     splits = blend.money_splits(share, ranges, rights)
     pct = blend.largest_remainder_pcts(share)
     exposure = exposure_from_index(index)
+    if resemblance is not None and cal["applied"]:
+        resemblance = {**resemblance, **_agreement(resemblance, share)}
     resemblance_shares = {t: v / 100.0 for t, v in (resemblance or {}).get("shares_pct", {}).items()}
     influence = []
     for track_id, v in sorted(share.items(), key=lambda kv: -kv[1]):
@@ -536,7 +570,7 @@ def build_influence_estimate(*, generation_id: str, artist_id: str, adapter_vers
         document["method"]["abstention"] = dict(abstention)
     if cal["applied"]:
         document["method"]["calibration"] = {
-            "schema": calibration.get("schema"), "factors": cal["factors"],
+            "schema": calibration.get("schema"), "factors": cal["factors"], "coverage": cal["coverage"],
             "fitted_on": dict(calibration.get("fitted_on") or {}), "fit_outputs": calibration.get("fit_outputs"),
             "kernel_shares": shares(track_totals)}
     elif calibration:

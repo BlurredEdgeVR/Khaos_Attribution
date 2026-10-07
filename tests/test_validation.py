@@ -190,3 +190,34 @@ def test_model_card_accepts_watermark_id_and_both_versions():
     bad["watermark_id"] = 99999999
     with pytest.raises(AttributionValidationError):
         validate_model_card(bad)
+
+
+def test_a_document_whose_money_contradicts_its_influence_is_refused():
+    """Writers plus unattributed must be the whole; on measured influence the shown share is the measured one."""
+    import copy
+    from khaos_attribution import validate_attribution_estimate, AttributionValidationError
+    from khaos_attribution.influence import InfluenceIndex  # noqa: F401
+    base = {"schema_version": "1.1.0", "generation_id": "g", "artist_id": "a", "adapter_version": "r",
+            "created_at": "2026-10-07T00:00:00+00:00",
+            "method": {"kind": "dtrak", "estimator_version": "0.1.0", "exposure_basis": "x", "similarity_informative": False},
+            "influence": [{"track_id": "t", "title": "T", "exposure_share_pct": 100.0, "similarity_share_pct": None,
+                           "influence_share_pct": 100.0, "blended_share_pct": 100.0, "share_range_pct": [96.7, 100.0]}],
+            "splits": {"writers": [{"name": "W", "share_pct": 100.0, "share_range_pct": [96.7, 100.0]}],
+                       "publishers": [], "masters": [], "unattributed_pct": 0.0},
+            "caveats": []}
+    assert validate_attribution_estimate(copy.deepcopy(base))
+    lying = copy.deepcopy(base); lying["splits"]["unattributed_pct"] = 100.0
+    with pytest.raises(AttributionValidationError, match="plus unattributed"):
+        validate_attribution_estimate(lying)
+    lying = copy.deepcopy(base); lying["influence"][0]["influence_share_pct"] = 40.0
+    with pytest.raises(AttributionValidationError, match="not the share the money follows"):
+        validate_attribution_estimate(lying)
+
+
+def test_a_rights_record_with_a_nan_share_is_refused():
+    from khaos_attribution import validate_track_rights, AttributionValidationError
+    rec = {"schema_version": "1.0.0", "track_id": "t", "title": "T", "isrc": {"status": "not_yet_looked_up"},
+           "iswc": {"status": "not_yet_looked_up"}, "writers": [{"name": "W", "role": "composer", "share_pct": float("nan")}],
+           "publishers": [], "source": "operator-entered", "verified_date": "2026-08-01"}
+    with pytest.raises(AttributionValidationError, match="not a finite number"):
+        validate_track_rights(rec)

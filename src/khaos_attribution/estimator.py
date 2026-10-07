@@ -85,6 +85,11 @@ def build_estimate(*, generation_id: str, artist_id: str,
             f"Embedding index lists {len(row_track_ids)} rows but the array "
             f"holds {len(embeddings)} — the store/bundle is torn (files "
             f"copied at different times?). Refusing to estimate from it.")
+    missing_rows = sorted(t for t, n in segment_counts.items() if n > 0 and t not in set(row_track_ids))
+    if missing_rows and len(segment_counts) > 1:
+        raise ValueError(
+            f"{len(missing_rows)} training track(s) have segments but no embedding rows — the store "
+            "is torn the other way (counts ahead of the array). Refusing to estimate from it.")
     if not np.isfinite(output_embedding).all():
         raise ValueError(
             f"The output's embedding for {generation_id} contains NaN or "

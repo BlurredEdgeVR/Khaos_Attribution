@@ -1,6 +1,7 @@
 """Validators for the provenance record and model card schemas."""
 
 import json
+import math
 from importlib import resources
 
 from jsonschema import Draft202012Validator, FormatChecker
@@ -50,6 +51,11 @@ _SHARE_TOLERANCE = 0.01
 
 
 def _check_share_sum(parties, pool, record_kind, required=True):
+    for p in parties:
+        v = p.get("share_pct", 0)
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):
+            raise AttributionValidationError(
+                f"Invalid {record_kind}: a {pool[:-1]} share is not a finite number")
     total = sum(p.get("share_pct", 0) for p in parties)
     if not parties:
         if required:
@@ -156,4 +162,18 @@ def validate_attribution_estimate(record):
                 raise AttributionValidationError(
                     f"Invalid attribution estimate: {pool[:-1]} "
                     f"{party['name']!r} share lies outside its own range")
+    # The money follows the influence: the writers' shares and the unattributed remainder are the whole.
+    writers_total = sum(p["share_pct"] for p in record["splits"].get("writers") or [])
+    unattributed = record["splits"].get("unattributed_pct", 0.0)
+    if abs(writers_total + unattributed - 100.0) > _SHARE_TOLERANCE:
+        raise AttributionValidationError(
+            f"Invalid attribution estimate: writers ({writers_total:g}) plus unattributed "
+            f"({unattributed:g}) is not 100")
+    if (record.get("method") or {}).get("kind") == "dtrak":
+        for entry in record["influence"]:
+            if entry.get("influence_share_pct") is None or \
+                    abs(entry["influence_share_pct"] - entry["blended_share_pct"]) > _SHARE_TOLERANCE:
+                raise AttributionValidationError(
+                    f"Invalid attribution estimate: track {entry['track_id']} measured influence is not "
+                    "the share the money follows")
     return record
