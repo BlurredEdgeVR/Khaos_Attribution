@@ -85,9 +85,15 @@ def is_hit(query: list, winner: str, expected: str | None, votes: int, distinct:
 
 
 def wavs(dirs: list) -> list:
-    out = []
+    """Every WAV under the folders, one per distinct content: an index holds a fingerprint once however many copies exist."""
+    import hashlib  # noqa: PLC0415
+    seen, out = set(), []
     for d in dirs:
-        out.extend(sorted(p for p in Path(d).rglob("*.wav") if not p.name.startswith("._")))
+        for p in sorted(p for p in Path(d).rglob("*.wav") if not p.name.startswith("._")):
+            digest = hashlib.sha256(p.read_bytes()).hexdigest()
+            if digest not in seen:
+                seen.add(digest)
+                out.append(p)
     return out
 
 

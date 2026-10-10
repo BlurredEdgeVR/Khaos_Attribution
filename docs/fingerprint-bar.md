@@ -70,3 +70,15 @@ file with the numbers that forced it.
 `scripts/fingerprint_survival.py` runs it and writes the record beside this
 file as `fingerprint-bar.<machine>.json`. The first run is on the laptop
 (M2 Max, 198 outputs, 35 catalogue tracks on 10 October 2026).
+
+## Amendment 1 (10 October 2026, after the first run)
+
+The first run indexed every WAV by path and 128 of 204 entries were copies:
+the scorecard's base-model control renders the same audio for every
+checkpoint, so 32 renders appeared four times each. Against itself a copy
+ties its twin exactly and the dominance rule cannot choose, which is the
+module's rule working as stated, not a fingerprint failure. The index is
+one entry per distinct content (by file hash), which is what a register
+would hold. The bar, the transforms and the decoys are unchanged. The
+first run's numbers (792 of 2,244 before deduplication, no false matches)
+are kept in git history; the record file is the rerun's.
