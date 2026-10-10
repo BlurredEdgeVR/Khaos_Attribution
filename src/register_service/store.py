@@ -19,7 +19,8 @@ CREATE TABLE IF NOT EXISTS invites (code TEXT PRIMARY KEY, account_id INTEGER NO
   created_at TEXT NOT NULL, used_by TEXT, used_at TEXT);
 CREATE TABLE IF NOT EXISTS machines (key_id TEXT PRIMARY KEY, account_id INTEGER NOT NULL, role TEXT NOT NULL DEFAULT 'workshop',
   name TEXT NOT NULL, public_pem TEXT NOT NULL, enrolled_at TEXT NOT NULL, revoked_at TEXT);
-CREATE TABLE IF NOT EXISTS nonces (key_id TEXT NOT NULL, nonce TEXT NOT NULL, at TEXT NOT NULL, PRIMARY KEY (key_id, nonce));
+CREATE TABLE IF NOT EXISTS nonces (key_id TEXT NOT NULL, nonce TEXT NOT NULL, body_sha256 TEXT NOT NULL, answer_json TEXT,
+  at TEXT NOT NULL, PRIMARY KEY (key_id, nonce));
 CREATE TABLE IF NOT EXISTS records (serial INTEGER PRIMARY KEY, record_sha256 TEXT UNIQUE NOT NULL,
   machine_key_id TEXT NOT NULL, account_id INTEGER NOT NULL, signed_json TEXT NOT NULL, counter_json TEXT NOT NULL,
   state TEXT NOT NULL, published_at TEXT NOT NULL, withdrawn_at TEXT, withdraw_reason TEXT);
@@ -85,14 +86,23 @@ class Store:
             self._ledger("enrol", None, None, key_id, {"account": account, "role": inv["role"]})
             return {"machine_key_id": key_id, "account": account, "role": inv["role"], "enrolled_at": at}
 
-    def spend_nonce(self, key_id: str, nonce: str) -> None:
-        """A signed body with a nonce is taken once; the same one again is a replay."""
+    def nonce_answer(self, key_id: str, nonce: str, body_sha256: str) -> dict | None:
+        """A body with a nonce is taken once: the same body again gets its first answer back; a different body
+        under a taken nonce is a replay and refused. None means the nonce is new and the caller does the work."""
         if not isinstance(nonce, str) or not 8 <= len(nonce) <= 64:
             raise PermissionError("the body carries no usable nonce")
+        with self._lock:
+            row = self.db.execute("SELECT body_sha256, answer_json FROM nonces WHERE key_id = ? AND nonce = ?", (key_id, nonce)).fetchone()
+        if row is None:
+            return None
+        if row["body_sha256"] != body_sha256:
+            raise PermissionError("this nonce was already taken for another body; a replay")
+        return json.loads(row["answer_json"]) if row["answer_json"] else {"taken": True}
+
+    def record_nonce(self, key_id: str, nonce: str, body_sha256: str, answer: dict) -> None:
         with self._lock, self.db:
-            if self.db.execute("SELECT 1 FROM nonces WHERE key_id = ? AND nonce = ?", (key_id, nonce)).fetchone():
-                raise PermissionError("this body was already taken; a replay")
-            self.db.execute("INSERT INTO nonces (key_id, nonce, at) VALUES (?, ?, ?)", (key_id, nonce, now_utc()))
+            self.db.execute("INSERT OR REPLACE INTO nonces (key_id, nonce, body_sha256, answer_json, at) VALUES (?, ?, ?, ?, ?)",
+                            (key_id, nonce, body_sha256, json.dumps(answer, sort_keys=True), now_utc()))
 
     def machine(self, key_id: str) -> dict | None:
         row = self.db.execute("SELECT * FROM machines WHERE key_id = ? AND revoked_at IS NULL", (key_id,)).fetchone()

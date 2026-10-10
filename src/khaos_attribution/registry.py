@@ -282,11 +282,35 @@ class Outbox:
         return out
 
     def mark_sent(self, path: Path, answer: dict) -> None:
-        sent = self.dir / "sent"
-        sent.mkdir(exist_ok=True)
+        self._move(path, "sent", answer)
+
+    def refuse(self, path: Path, answer: dict) -> None:
+        """An entry the register refused for what it is (not for being unreachable): set aside, never retried."""
+        self._move(path, "refused", answer)
+
+    def refused(self) -> list:
+        out = []
+        for p in sorted((self.dir / "refused").glob("*.json")):
+            try:
+                out.append(json.loads(p.read_text(encoding="utf-8")))
+            except (OSError, ValueError):
+                continue
+        return out
+
+    def drop(self, entry_id: str) -> bool:
+        """A pending entry withdrawn before it was ever sent: gone, as if never written."""
+        for p in self.dir.glob("*.json"):
+            if p.name.endswith(f"-{entry_id[:12]}.json"):
+                p.unlink()
+                return True
+        return False
+
+    def _move(self, path: Path, folder: str, answer: dict) -> None:
+        dest = self.dir / folder
+        dest.mkdir(exist_ok=True)
         doc = json.loads(Path(path).read_text(encoding="utf-8"))
         doc["answer"] = answer
-        (sent / Path(path).name).write_text(json.dumps(doc, sort_keys=True), encoding="utf-8")
+        (dest / Path(path).name).write_text(json.dumps(doc, sort_keys=True), encoding="utf-8")
         Path(path).unlink()
 
 
@@ -359,8 +383,17 @@ class RegisterClient:
         done = []
         for path, entry in outbox.pending():
             kind, body = entry["kind"], entry["body"]
-            answer = {"publish": self.publish, "withdraw": lambda b: self.withdraw(**b),
-                      "served": lambda b: self.served(**b)}[kind](body)
+            try:
+                answer = {"publish": self.publish, "withdraw": lambda b: self.withdraw(**b),
+                          "served": lambda b: self.served(**b)}[kind](body)
+            except RegisterError as e:
+                # Not enrolled, a replay of another body, or the register itself failing: stop and keep order.
+                # A refusal of this entry for what it is (wrong account, no such serial, a record it will not take)
+                # is set aside so the entries behind it are not held for ever.
+                if e.status in (401, 409) or e.status >= 500:
+                    raise
+                outbox.refuse(path, {"status": e.status, "message": str(e)})
+                continue
             if kind == "publish" and register_public_pem is not None:
                 if not countersignature_valid(answer.get("countersignature") or {}, body["record_sha256"], register_public_pem):
                     raise RegisterError(502, "the register's countersignature is not the pinned key's; nothing was marked sent")

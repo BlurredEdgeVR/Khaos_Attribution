@@ -151,40 +151,51 @@ def create_app(cfg: dict | None = None) -> FastAPI:
         except (TypeError, ValueError):
             raise HTTPException(422, "serial must be an integer") from None
 
-    def take_nonce(body: dict, key_id: str) -> None:
+    def once(body: dict, key_id: str, work):
+        """The nonce is an idempotency key: the same signed body again gets its first answer, never a second effect."""
+        digest = R.sha256_hex(R.canonical_bytes(body))
         try:
-            store.spend_nonce(key_id, body.get("nonce"))
+            earlier = store.nonce_answer(key_id, str(body.get("nonce", "")), digest)
         except PermissionError as e:
             raise HTTPException(409, str(e)) from None
+        if earlier is not None:
+            return earlier
+        out = work()
+        store.record_nonce(key_id, str(body.get("nonce")), digest, out)
+        return out
 
     @app.post("/api/withdraw")
     async def withdraw(request: Request):
         body, _, key_id, _ = await signed_body(request)
-        take_nonce(body, key_id)
-        try:
-            out = store.withdraw(serial_of(body), key_id, str(body.get("reason", "")))
-        except KeyError as e:
-            raise HTTPException(404, str(e)) from None
-        except PermissionError as e:
-            raise HTTPException(403, str(e)) from None
-        mirror_quietly(out["serial"])
-        return out
+
+        def work():
+            try:
+                out = store.withdraw(serial_of(body), key_id, str(body.get("reason", "")))
+            except KeyError as e:
+                raise HTTPException(404, str(e)) from None
+            except PermissionError as e:
+                raise HTTPException(403, str(e)) from None
+            mirror_quietly(out["serial"])
+            return out
+        return once(body, key_id, work)
 
     @app.post("/api/served")
     async def served(request: Request):
         body, _, key_id, _ = await signed_body(request)
-        take_nonce(body, key_id)
         state = str(body.get("state", ""))
         if state not in ("serving", "removed"):
             raise HTTPException(422, "state is serving or removed")
-        try:
-            out = store.served(serial_of(body), key_id, str(body.get("space_url", ""))[:200], state)
-        except KeyError as e:
-            raise HTTPException(404, str(e)) from None
-        except PermissionError as e:
-            raise HTTPException(403, str(e)) from None
-        mirror_quietly(out["serial"])
-        return out
+
+        def work():
+            try:
+                out = store.served(serial_of(body), key_id, str(body.get("space_url", ""))[:200], state)
+            except KeyError as e:
+                raise HTTPException(404, str(e)) from None
+            except PermissionError as e:
+                raise HTTPException(403, str(e)) from None
+            mirror_quietly(out["serial"])
+            return out
+        return once(body, key_id, work)
 
     dev_banner = ('<p style="background:#fbf1e6;color:#b4651b;padding:8px 12px;border-radius:6px">This register signs with a '
                   'development key. Nothing it countersigns is a Guild record.</p>' if cfg["dev_key"] else "")

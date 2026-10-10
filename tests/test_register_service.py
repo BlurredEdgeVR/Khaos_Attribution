@@ -128,7 +128,7 @@ def test_withdrawal_is_the_owning_accounts_alone_and_only_a_space_reports_servin
 
 
 def test_a_captured_body_cannot_be_replayed(register):
-    """A served or withdraw body carries a nonce the register takes once: the same signed bytes again are refused."""
+    """A served or withdraw body carries a nonce the register takes once: the same signed bytes again have no second effect."""
     app, store, http = register
     key, client = _machine(register, "artist-one")
     _, space = _machine(register, "artist-one", role="space")
@@ -143,8 +143,8 @@ def test_a_captured_body_cannot_be_replayed(register):
     space._post = capture
     assert space.served(serial, "https://space.example", "serving")["state"] == "serving"
     assert space.served(serial, "https://space.example", "removed")["state"] == "removed"
-    with pytest.raises(R.RegisterError, match="replay"):
-        real("/api/served", captured["/api/served"])
+    replayed = real("/api/served", captured["/api/served"])
+    assert replayed["state"] == "removed", "the captured bytes get their own first answer back and change nothing"
     assert http.get(f"/api/models/{serial}").json()["served"][0]["state"] == "removed"
 
 
@@ -198,3 +198,39 @@ def test_the_ledger_chains_every_entry_and_a_changed_entry_breaks_it(register):
     assert not store.ledger_ok()
     assert (app.state.cfg["data"] / "mirror" / "models" / f"{serial}.json").is_file()
     assert (app.state.cfg["data"] / "mirror" / "ledger.jsonl").read_text(encoding="utf-8").count("\n") == 5
+
+
+def test_the_same_signed_body_again_gets_its_first_answer_and_a_refused_one_does_not_burn_its_nonce(register):
+    """The nonce is an idempotency key: a lost answer is recovered by sending the same bytes; a 404 can be retried."""
+    app, store, http = register
+    key, client = _machine(register, "artist-one")
+    _, space = _machine(register, "artist-one", role="space")
+    serial = client.publish(_signed(key))["serial"]
+    body = {"serial": serial, "space_url": "https://space.example", "state": "serving", "nonce": "nonce-0001-abcd"}
+    first = space._post("/api/served", body)
+    again = space._post("/api/served", body)
+    assert again == first, "the same body is answered the same, with no second effect"
+    assert len(http.get(f"/api/models/{serial}").json()["served"]) == 1
+    with pytest.raises(R.RegisterError, match="replay"):
+        space._post("/api/served", {**body, "state": "removed"})
+    missing = {"serial": 70000, "reason": "x", "nonce": "nonce-0002-abcd"}
+    for _ in range(2):
+        with pytest.raises(R.RegisterError) as e:
+            client._post("/api/withdraw", missing)
+        assert e.value.status == 404, "a refusal is the same refusal twice, never a replay"
+
+
+def test_sync_sets_a_refused_entry_aside_and_goes_on(register, tmp_path):
+    """A withdrawal the register refuses for what it is does not hold the publishes behind it."""
+    app, store, http = register
+    key, client = _machine(register, "artist-one")
+    box = R.Outbox(tmp_path)
+    box.append("withdraw", {"serial": 70000, "reason": "never issued", "nonce": "0123456789ab"})
+    box.append("publish", _signed(key))
+    done = client.sync(box)
+    assert [a["serial"] for _, a in done] == [R.FIRST_SERIAL] and not box.pending()
+    refused = box.refused()
+    assert len(refused) == 1 and refused[0]["answer"]["status"] == 404
+    assert box.drop("nothing") is False
+    eid = box.append("served", {"serial": R.FIRST_SERIAL, "space_url": "x", "state": "serving", "nonce": "0123456789ac"})
+    assert box.drop(eid) is True and not box.pending()

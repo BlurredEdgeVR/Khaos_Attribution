@@ -19,7 +19,7 @@ from importlib import resources
 from typing import Sequence
 
 __all__ = [
-    "CHARSET", "COLOURWAYS", "SealRefused", "render_seal", "render_marks_row",
+    "CHARSET", "COLOURWAYS", "SealRefused", "artist_mark_of", "render_seal", "render_marks_row",
     "seal_for_provenance", "marks_row_for_provenance", "provenance_values",
 ]
 
@@ -368,6 +368,15 @@ def _jitter_from_digest(digest: bytes, n: int) -> list[tuple[float, float, float
 _INITIALS_SPLIT = re.compile(r"[\s\-_/.]+")
 
 
+def artist_mark_of(name: str) -> str:
+    """The initials a seal strikes for a name: one per word, up to three; the first three letters when fewer than two."""
+    words = [w for w in _INITIALS_SPLIT.split(name.upper()) if w]
+    letters = "".join(w[0] for w in words if w[0] in CHARSET and w[0] != " ")[:3]
+    if len(letters) < 2:
+        letters = "".join(c for c in name.upper() if c.isalnum() and c in CHARSET)[:3]
+    return letters
+
+
 def provenance_values(document: dict, *, number_key: str = "watermark_id") -> dict:
     """The four values a mark is struck with, read from a verified document.
 
@@ -388,14 +397,7 @@ def provenance_values(document: dict, *, number_key: str = "watermark_id") -> di
     number = record.get(number_key)
     if number is None or number == "":
         raise SealRefused(f"the record carries no {number_key!r} to seal")
-    mark = record.get("artist_mark")
-    if not mark:
-        name = str(record.get("artist_name") or "")
-        words = [w for w in _INITIALS_SPLIT.split(name.upper()) if w]
-        letters = "".join(w[0] for w in words if w[0] in CHARSET and w[0] != " ")[:3]
-        if len(letters) < 2:
-            letters = "".join(c for c in name.upper() if c.isalnum() and c in CHARSET)[:3]
-        mark = letters
+    mark = record.get("artist_mark") or artist_mark_of(str(record.get("artist_name") or ""))
     version = record.get("standard_version")
     if not version:
         parts = str(record.get("schema_version") or "").split(".")
