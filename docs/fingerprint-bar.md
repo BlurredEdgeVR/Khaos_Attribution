@@ -100,3 +100,12 @@ candidate is scored by its best phase (worst case on that output: 147 to
 2,395 votes). The bar, the transforms and the decoys are unchanged; the
 third run measures the four-phase matcher. If adopted, it is the matcher
 the index service uses.
+
+## Result (10 October 2026, laptop, third run, the one that counts)
+
+**Passed.** One entry per content, the query matched at four sub-hop phases.
+Identification 1,168 of 1,188 counted pairs (98.3%); every counted transform
+at or above 92.6% (the lowest: the 10 s clip, 100 of 108); the 5 s clip,
+reported and not counted, 93 of 108. No decoy matched any output under any
+transform: 0 of 348. The record is `fingerprint-bar.laptop.json`. The index
+service (phase 5) uses the four-phase matcher; the stored format stays v1.
