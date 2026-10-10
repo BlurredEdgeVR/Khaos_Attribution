@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import html
 import json
+import logging
 import os
 from pathlib import Path
 
@@ -18,13 +19,15 @@ from khaos_attribution import registry as R
 from register_service.store import Store, now_utc
 
 MAX_BODY = 2_000_000
+DEFAULT_PORT = 8912   # 8900 is the Engine Room's
+log = logging.getLogger("register_service")
 
 
 def settings() -> dict:
     data = Path(os.environ.get("REGISTER_DATA_DIR", "./register-data")).resolve()
     key_file = Path(os.environ.get("REGISTER_KEY_FILE", str(data / "register-key.pem")))
     return {"data": data, "key_file": key_file, "dev_key": os.environ.get("REGISTER_DEV_KEY") == "1",
-            "public_url": os.environ.get("REGISTER_PUBLIC_URL", "http://127.0.0.1:8900").rstrip("/")}
+            "public_url": os.environ.get("REGISTER_PUBLIC_URL", f"http://127.0.0.1:{DEFAULT_PORT}").rstrip("/")}
 
 
 def load_register_key(cfg: dict) -> R.SigningKey:
@@ -69,6 +72,8 @@ def create_app(cfg: dict | None = None) -> FastAPI:
             body = json.loads(raw)
         except ValueError:
             raise HTTPException(400, "not JSON") from None
+        if not isinstance(body, dict):
+            raise HTTPException(400, "the body must be a JSON object")
         if R.canonical_bytes(body) != raw:
             raise HTTPException(400, "the body must be canonical JSON (sorted keys, no spaces)")
         key_id = request.headers.get("X-Machine-Key-Id", "")
@@ -96,6 +101,7 @@ def create_app(cfg: dict | None = None) -> FastAPI:
         rec = store.record(serial)
         doc = {"serial": serial, "state": rec["state"], "record": public_view(rec["signed"]["record"]),
                "record_sha256": rec["record_sha256"], "machine_key_id": rec["machine_key_id"],
+               "machine_public_pem": rec.get("machine_public_pem"),
                "countersignature": rec["countersignature"], "served": rec["served"],
                "withdrawn_at": rec["withdrawn_at"], "withdraw_reason": rec["withdraw_reason"]}
         tmp = mirror / "models" / f"{serial}.json.new"
@@ -104,6 +110,13 @@ def create_app(cfg: dict | None = None) -> FastAPI:
         with open(mirror / "ledger.jsonl", "w", encoding="utf-8") as fh:
             for e in store.ledger():
                 fh.write(json.dumps(e, sort_keys=True) + "\n")
+
+    def mirror_quietly(serial: int) -> None:
+        # The record is in the ledger; a mirror that cannot be written is logged and written on the next change.
+        try:
+            write_mirror(serial)
+        except Exception as exc:  # noqa: BLE001
+            log.error("mirror not written for %s: %s", serial, exc)
 
     @app.post("/api/enrol")
     async def enrol(request: Request):
@@ -125,44 +138,60 @@ def create_app(cfg: dict | None = None) -> FastAPI:
             raise HTTPException(422, "; ".join(problems))
         if record["model"]["machine_key_id"] != key_id:
             raise HTTPException(422, "the record names another machine as its maker")
-        have = store.existing(signed["record_sha256"])
-        if have:
-            return {"serial": have["serial"], "countersignature": json.loads(have["counter_json"]), "already": True}
-        serial = store.next_serial()
-        counter = R.countersign(signed, serial, key, now_utc())
-        store.insert_record(serial, signed, counter, key_id, machine["account_id"])
-        write_mirror(serial)
-        return {"serial": serial, "countersignature": counter, "already": False,
+        serial, counter, already = store.register(signed, key_id, machine["account_id"],
+                                                  lambda n: R.countersign(signed, n, key, now_utc()))
+        if not already:
+            mirror_quietly(serial)
+        return {"serial": serial, "countersignature": counter, "already": already,
                 "page": f"{cfg['public_url']}/models/{serial}"}
+
+    def serial_of(body: dict) -> int:
+        try:
+            return int(body.get("serial"))
+        except (TypeError, ValueError):
+            raise HTTPException(422, "serial must be an integer") from None
+
+    def take_nonce(body: dict, key_id: str) -> None:
+        try:
+            store.spend_nonce(key_id, body.get("nonce"))
+        except PermissionError as e:
+            raise HTTPException(409, str(e)) from None
 
     @app.post("/api/withdraw")
     async def withdraw(request: Request):
         body, _, key_id, _ = await signed_body(request)
+        take_nonce(body, key_id)
         try:
-            out = store.withdraw(int(body.get("serial", 0)), key_id, str(body.get("reason", "")))
+            out = store.withdraw(serial_of(body), key_id, str(body.get("reason", "")))
         except KeyError as e:
             raise HTTPException(404, str(e)) from None
         except PermissionError as e:
             raise HTTPException(403, str(e)) from None
-        write_mirror(out["serial"])
+        mirror_quietly(out["serial"])
         return out
 
     @app.post("/api/served")
     async def served(request: Request):
         body, _, key_id, _ = await signed_body(request)
+        take_nonce(body, key_id)
         state = str(body.get("state", ""))
         if state not in ("serving", "removed"):
             raise HTTPException(422, "state is serving or removed")
         try:
-            out = store.served(int(body.get("serial", 0)), key_id, str(body.get("space_url", ""))[:200], state)
+            out = store.served(serial_of(body), key_id, str(body.get("space_url", ""))[:200], state)
         except KeyError as e:
             raise HTTPException(404, str(e)) from None
-        write_mirror(out["serial"])
+        except PermissionError as e:
+            raise HTTPException(403, str(e)) from None
+        mirror_quietly(out["serial"])
         return out
+
+    dev_banner = ('<p style="background:#fbf1e6;color:#b4651b;padding:8px 12px;border-radius:6px">This register signs with a '
+                  'development key. Nothing it countersigns is a Guild record.</p>' if cfg["dev_key"] else "")
 
     @app.get("/api/public-key")
     def public_key():
-        return {"register_key_id": key.key_id, "public_key_pem": key.public_pem()}
+        return {"register_key_id": key.key_id, "public_key_pem": key.public_pem(), "development": bool(cfg["dev_key"])}
 
     @app.get("/api/models/{serial}")
     def model_json(serial: int):
@@ -203,7 +232,7 @@ def create_app(cfg: dict | None = None) -> FastAPI:
 <style>body{{font:16px/1.5 system-ui,sans-serif;max-width:720px;margin:40px auto;padding:0 20px;color:#141a1b}}
 th{{text-align:left;padding:4px 12px 4px 0;vertical-align:top;white-space:nowrap}}td{{word-break:break-all}}h1{{font-size:1.6rem}}
 p.note{{color:#5a6668;font-size:0.95rem}}</style>
-<h1>Register No. {serial}</h1><table>{body}</table>
+{dev_banner}<h1>Register No. {serial}</h1><table>{body}</table>
 {'<h2>Trained on</h2><ul>' + tracks + '</ul>' if tracks else f'<p>Trained on {ts.get("track_count", 0)} tracks (the artist shows the model alone).</p>'}
 {'<h2>Served at</h2><ul>' + served + '</ul>' if served else ''}
 <p class="note">{note}</p>
@@ -215,12 +244,12 @@ p.note{{color:#5a6668;font-size:0.95rem}}</style>
         items = "".join(f'<li><a href="/models/{s}">Register No. {s}</a></li>' for s in serials[-50:][::-1])
         return f"""<!doctype html><meta charset="utf-8"><title>Guild Register</title>
 <style>body{{font:16px/1.5 system-ui,sans-serif;max-width:720px;margin:40px auto;padding:0 20px}}</style>
-<h1>The Guild Register</h1><p>The public ledger of registered fine-tuned models: what each was trained on, as its
+{dev_banner}<h1>The Guild Register</h1><p>The public ledger of registered fine-tuned models: what each was trained on, as its
 artist attested, countersigned by the register and never edited.</p><p>{len(serials)} models registered.</p>
 <ul>{items}</ul><p><a href="/api/ledger">The ledger</a> · <a href="/api/public-key">The register's public key</a></p>"""
 
     @app.get("/health")
     def health():
-        return JSONResponse({"ok": True, "ledger_ok": store.ledger_ok(), "models": len(store.serials())})
+        return JSONResponse({"ok": True, "ledger_ok": store.ledger_ok(), "models": len(store.serials()), "development": bool(cfg["dev_key"])})
 
     return app

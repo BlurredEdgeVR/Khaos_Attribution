@@ -123,7 +123,8 @@ DERIVED_PAYLOADS = range(32, PAYLOAD_SPACE)
 
 
 def derive_payload(machine_key_id: str, run_id: str) -> int:
-    """The bucket for a run: deterministic from the machine key id and the run id."""
+    """The bucket for a run: deterministic from the machine key id and the run id.
+    2**64 mod 2016 is not 0, so 1,024 buckets are heavier by about one part in 2**53: nothing."""
     import hashlib  # noqa: PLC0415
     digest = hashlib.sha256(f"{machine_key_id}:{run_id}".encode("utf-8")).digest()
     return DERIVED_PAYLOADS.start + int.from_bytes(digest[:8], "big") % len(DERIVED_PAYLOADS)

@@ -1,5 +1,7 @@
 # The registry service — leased IDs, central fingerprints, one consent root
 
+> **Superseded in part, 0.26.0 (October 2026):** leases were never built. What shipped is `khaos_attribution/registry.py` and `register_service/`: a serial per model from 65,536, countersigned records, an outbox, enrolment by invite, withdrawal; the watermark payload is a derived bucket. §3's leases and §7's phase 4 do not apply; the rest of the shape stands. The plan of record is the Workshop's `docs/plans/register-and-publish.md`.
+
 Plan, not commitment (2026-08-22). Code is the truth; this is the shape
 to build towards once the Workshop release work starts (it is the same
 "move trust out of the client" move as that plan).

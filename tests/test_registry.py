@@ -110,3 +110,34 @@ def test_the_client_signs_every_body_and_syncs_in_order(monkeypatch, tmp_path):
     box.append("served", {"serial": 65537, "space_url": "https://space.example", "state": "serving"})
     done = client.sync(box)
     assert [c[0] for c in calls] == ["/api/records", "/api/served"] and len(done) == 2 and not box.pending()
+
+
+def test_the_real_client_speaks_http_to_a_live_register(tmp_path):
+    """The client's own urllib call: headers, canonical bytes, error mapping, against the service on a socket."""
+    pytest.importorskip("fastapi"); pytest.importorskip("uvicorn")
+    import socket, threading, time, urllib.request
+    import uvicorn
+    sys.path.insert(0, "src")
+    from register_service.app import create_app
+    app = create_app({"data": tmp_path / "d", "key_file": tmp_path / "d" / "k.pem", "dev_key": True, "public_url": "http://x"})
+    app.state.store.create_account("a")
+    invite = app.state.store.create_invite("a")
+    with socket.socket() as s_:
+        s_.bind(("127.0.0.1", 0)); port = s_.getsockname()[1]
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error"))
+    threading.Thread(target=server.run, daemon=True).start()
+    for _ in range(100):
+        try:
+            urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=1); break
+        except Exception:  # noqa: BLE001
+            time.sleep(0.1)
+    key = R.SigningKey.generate()
+    client = R.RegisterClient(f"http://127.0.0.1:{port}", key)
+    with pytest.raises(R.RegisterError) as e:
+        client.withdraw(65536, "x")
+    assert e.value.status == 401 and "not enrolled" in str(e.value)
+    assert client.enrol(invite, "box")["account"] == "a"
+    rec = _record(); rec["model"]["machine_key_id"] = key.key_id
+    rec["model"]["watermark_payload"] = derive_payload(key.key_id, "run_1")
+    assert client.publish(R.sign_record(rec, key))["serial"] == R.FIRST_SERIAL
+    server.should_exit = True

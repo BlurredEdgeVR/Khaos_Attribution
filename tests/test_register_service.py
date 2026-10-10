@@ -42,12 +42,12 @@ def register(tmp_path):
     return app, store, TestClient(app)
 
 
-def _machine(register, account):
+def _machine(register, account, role="workshop"):
     app, store, http = register
     key = R.SigningKey.generate()
     client = R.RegisterClient("https://register.example", key)
     client._post = _Transport(http, key)
-    client.enrol(store.create_invite(account), "a machine")
+    client.enrol(store.create_invite(account, role), "a machine")
     return key, client
 
 
@@ -106,19 +106,70 @@ def test_a_record_naming_another_machine_or_signed_by_another_key_is_refused(reg
         client.publish(R.sign_record(rec, key))
 
 
-def test_withdrawal_is_the_owning_accounts_alone_and_served_is_recorded(register):
+def test_withdrawal_is_the_owning_accounts_alone_and_only_a_space_reports_serving(register):
     app, store, http = register
     key, client = _machine(register, "artist-one")
     _, stranger = _machine(register, "artist-two")
+    _, space = _machine(register, "artist-two", role="space")
     serial = client.publish(_signed(key))["serial"]
     with pytest.raises(R.RegisterError, match="account"):
         stranger.withdraw(serial, "not mine")
-    assert stranger.served(serial, "https://space.example", "serving")["state"] == "serving"
+    with pytest.raises(R.RegisterError, match="only an enrolled Space"):
+        stranger.served(serial, "https://evil.example", "serving")
+    with pytest.raises(R.RegisterError, match="only an enrolled Space"):
+        client.served(serial, "https://evil.example", "serving")
+    assert space.served(serial, "https://space.example", "serving")["state"] == "serving"
     out = client.withdraw(serial, "the artist withdrew consent")
     assert out["state"] == "withdrawn" and http.get("/api/withdrawn").json()["withdrawn"] == [serial]
     doc = http.get(f"/api/models/{serial}").json()
     assert doc["state"] == "withdrawn" and doc["served"][0]["space_url"] == "https://space.example"
     assert "withdrawn" in http.get(f"/models/{serial}").text
+    assert doc["machine_public_pem"].startswith("-----BEGIN PUBLIC KEY-----"), "a reader of the mirror can check the machine's signature"
+
+
+def test_a_captured_body_cannot_be_replayed(register):
+    """A served or withdraw body carries a nonce the register takes once: the same signed bytes again are refused."""
+    app, store, http = register
+    key, client = _machine(register, "artist-one")
+    _, space = _machine(register, "artist-one", role="space")
+    serial = client.publish(_signed(key))["serial"]
+    captured = {}
+
+    real = space._post
+
+    def capture(path, body):
+        captured[path] = body
+        return real(path, body)
+    space._post = capture
+    assert space.served(serial, "https://space.example", "serving")["state"] == "serving"
+    assert space.served(serial, "https://space.example", "removed")["state"] == "removed"
+    with pytest.raises(R.RegisterError, match="replay"):
+        real("/api/served", captured["/api/served"])
+    assert http.get(f"/api/models/{serial}").json()["served"][0]["state"] == "removed"
+
+
+def test_a_record_that_passes_the_check_never_breaks_its_page(register):
+    """Every shape the page and the views read is checked before a serial is spent."""
+    app, store, http = register
+    key, client = _machine(register, "artist-one")
+    for breaker in (lambda r: r["training_set"].__setitem__("tracks", ["t1"]),
+                    lambda r: r.__setitem__("provenance", {}),
+                    lambda r: r["training_set"]["tracks"][0]["writers"].__setitem__(0, {"name": "W"}),
+                    lambda r: r.__setitem__("model", "x")):
+        rec = _record(); rec["model"]["machine_key_id"] = key.key_id
+        rec["model"]["watermark_payload"] = derive_payload(key.key_id, "run_1")
+        breaker(rec)
+        with pytest.raises(ValueError):
+            R.sign_record(rec, key)
+    # malformed but signed bodies are refusals in words, never 500s
+    for path, body, status in (("/api/withdraw", {"serial": "abc", "reason": "x", "nonce": "0123456789ab"}, 422),
+                               ("/api/served", {"serial": 65536, "space_url": "x", "state": "sideways", "nonce": "0123456789ac"}, 422)):
+        data = R.canonical_bytes(body)
+        r = http.post(path, content=data, headers={"Content-Type": "application/json", "X-Machine-Key-Id": key.key_id, "X-Machine-Signature": key.sign(data)})
+        assert r.status_code == status, (path, r.status_code, r.text)
+    data = b"[1]"
+    r = http.post("/api/records", content=data, headers={"Content-Type": "application/json", "X-Machine-Key-Id": key.key_id, "X-Machine-Signature": key.sign(data)})
+    assert r.status_code == 400
 
 
 def test_the_three_public_views_show_what_the_artist_chose():
@@ -138,6 +189,8 @@ def test_the_ledger_chains_every_entry_and_a_changed_entry_breaks_it(register):
     client.withdraw(serial, "x")
     kinds = [e["kind"] for e in store.ledger()]
     assert kinds == ["account", "account", "enrol", "publish", "withdraw"] and store.ledger_ok()
+    assert "machine" not in store.ledger()[2]["detail"], "the public ledger names the key and the account, never the machine's name"
+    assert http.get("/api/public-key").json()["development"] is True and "development key" in http.get("/").text
     assert http.get("/health").json()["ledger_ok"] is True
     lines = http.get("/api/ledger").text.strip().splitlines()
     assert len(lines) == 5 and json.loads(lines[-1])["kind"] == "withdraw"

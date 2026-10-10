@@ -21,7 +21,7 @@ FIRST_SERIAL = 65536   # above every 16-bit codeword a seal struck before the re
 PUBLIC_VIEWS = ("model", "tracks", "writers")
 OUTBOX_DIR = ".register_outbox"
 MACHINE_KEY_FILE = ".register_machine_key.pem"
-MACHINE_KEY_PUBLIC_FILE = ".register_machine_key.pub"
+MACHINE_KEY_PUBLIC_FILE = ".register_machine_key.pub"   # the key file's stem with .pub
 
 
 def canonical_bytes(doc: dict) -> bytes:
@@ -76,7 +76,7 @@ class SigningKey:
         except OSError:
             pass
         os.replace(tmp, path)
-        path.with_name(MACHINE_KEY_PUBLIC_FILE).write_text(key.public_pem(), encoding="utf-8")
+        path.with_suffix(".pub").write_text(key.public_pem(), encoding="utf-8")
         return key
 
     def public_pem(self) -> str:
@@ -119,9 +119,17 @@ REQUIRED_RECORD_KEYS = (
 )
 
 
+def _is_sha256(v) -> bool:
+    return isinstance(v, str) and len(v) == 64 and all(c in "0123456789abcdef" for c in v)
+
+
 def record_problems(record: dict) -> list:
-    """What keeps a record out of the register, in words; empty means it may be signed."""
+    """What keeps a record out of the register, in words; empty means it may be signed.
+    Every field the public page and the views read is checked here, so a numbered record never breaks them."""
+    from khaos_attribution.watermark import DERIVED_PAYLOADS  # noqa: PLC0415
     out = []
+    if not isinstance(record, dict):
+        return ["the record is not an object"]
     for k in REQUIRED_RECORD_KEYS:
         if k not in record:
             out.append(f"missing {k}")
@@ -131,27 +139,64 @@ def record_problems(record: dict) -> list:
         out.append(f"record_version is {record['record_version']!r}, not {RECORD_VERSION!r}")
     if record["public_view"] not in PUBLIC_VIEWS:
         out.append(f"public_view must be one of {PUBLIC_VIEWS}")
+    for k in ("artist_id", "artist_name", "artist_mark", "published_at_utc"):
+        if not isinstance(record[k], str) or not record[k].strip():
+            out.append(f"{k} must be a non-empty string")
+    for k in ("consent", "model", "provenance", "training_set", "measured"):
+        if not isinstance(record[k], dict):
+            out.append(f"{k} must be an object")
+    if out:
+        return out
     model = record["model"]
-    for k in ("run_id", "adapter_sha256", "card_sha256", "watermark_payload", "base_model", "base_model_licence", "machine_key_id"):
-        if not model.get(k) and model.get(k) != 0:
-            out.append(f"model.{k} is empty")
-    payload = model.get("watermark_payload")
-    if not isinstance(payload, int) or not 32 <= payload < 2048:
-        out.append("model.watermark_payload must be a derived payload, 32 to 2047")
+    for k in ("run_id", "base_model", "base_model_licence", "machine_key_id"):
+        if not isinstance(model.get(k), str) or not model[k].strip():
+            out.append(f"model.{k} must be a non-empty string")
     for k in ("adapter_sha256", "card_sha256"):
-        v = model.get(k)
-        if not (isinstance(v, str) and len(v) == 64):
+        if not _is_sha256(model.get(k)):
             out.append(f"model.{k} must be a sha256 hex digest")
+    payload = model.get("watermark_payload")
+    if not isinstance(payload, int) or isinstance(payload, bool) or payload not in DERIVED_PAYLOADS:
+        out.append(f"model.watermark_payload must be a derived payload, {DERIVED_PAYLOADS.start} to {DERIVED_PAYLOADS.stop - 1}")
+    for k in ("base_model_commit", "workshop_commit", "engine_commit", "trained_at_utc", "card_schema_version"):
+        if k in model and model[k] is not None and not isinstance(model[k], str):
+            out.append(f"model.{k} must be a string or null")
     consent = record["consent"]
-    if not isinstance(consent.get("statement_sha256"), str) or len(consent["statement_sha256"]) != 64:
+    if not _is_sha256(consent.get("statement_sha256")):
         out.append("consent.statement_sha256 must be a sha256 hex digest")
-    tracks = record["training_set"].get("tracks")
+    if "scope" in consent and not isinstance(consent["scope"], dict):
+        out.append("consent.scope must be an object")
+    prov = record["provenance"]
+    if not isinstance(prov.get("dataset_hash"), str) or not prov["dataset_hash"]:
+        out.append("provenance.dataset_hash must be a string")
+    if "config_hash" in prov and prov["config_hash"] is not None and not isinstance(prov["config_hash"], str):
+        out.append("provenance.config_hash must be a string or null")
+    if "seed" in prov and prov["seed"] is not None and (not isinstance(prov["seed"], int) or isinstance(prov["seed"], bool)):
+        out.append("provenance.seed must be an integer or null")
+    ts = record["training_set"]
+    tracks = ts.get("tracks")
     if not isinstance(tracks, list) or not tracks:
         out.append("training_set.tracks must name at least one track")
-    if record["public_view"] == "writers":
-        agreed = record["training_set"].get("writers_agreed")
-        if agreed is not True:
-            out.append("public_view 'writers' needs training_set.writers_agreed: true, every named writer having agreed")
+    else:
+        for i, t in enumerate(tracks):
+            if not isinstance(t, dict) or not isinstance(t.get("track_id"), str) or not t["track_id"]:
+                out.append(f"training_set.tracks[{i}] must be an object with a track_id")
+                continue
+            if "title" in t and t["title"] is not None and not isinstance(t["title"], str):
+                out.append(f"training_set.tracks[{i}].title must be a string or null")
+            if "duration_sec" in t and t["duration_sec"] is not None and not isinstance(t["duration_sec"], (int, float)):
+                out.append(f"training_set.tracks[{i}].duration_sec must be a number or null")
+            writers = t.get("writers", [])
+            if not isinstance(writers, list):
+                out.append(f"training_set.tracks[{i}].writers must be a list")
+                continue
+            for j, w in enumerate(writers):
+                if (not isinstance(w, dict) or not isinstance(w.get("name"), str) or not w["name"]
+                        or not isinstance(w.get("share"), (int, float)) or isinstance(w.get("share"), bool)):
+                    out.append(f"training_set.tracks[{i}].writers[{j}] must have a name and a numeric share")
+    if "rights_sha256" in ts and ts["rights_sha256"] is not None and not _is_sha256(ts["rights_sha256"]):
+        out.append("training_set.rights_sha256 must be a sha256 hex digest or null")
+    if record["public_view"] == "writers" and ts.get("writers_agreed") is not True:
+        out.append("public_view 'writers' needs training_set.writers_agreed: true, every named writer having agreed")
     return out
 
 
@@ -171,7 +216,10 @@ def signed_problems(signed: dict, machine_public_pem: str) -> list:
     if signed.get("signed_version") != SIGNED_VERSION:
         out.append("not a signed record")
         return out
-    body = canonical_bytes(signed.get("record") or {})
+    if not isinstance(signed.get("record"), dict):
+        out.append("record must be an object")
+        return out
+    body = canonical_bytes(signed["record"])
     if signed.get("record_sha256") != sha256_hex(body):
         out.append("record_sha256 does not match the record")
     if key_id_of(public_raw(load_public_pem(machine_public_pem))) != signed.get("machine_key_id"):
