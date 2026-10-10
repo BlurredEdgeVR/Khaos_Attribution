@@ -272,6 +272,15 @@ class Outbox:
         os.replace(tmp, path)
         return entry_id
 
+    def noted(self, key: str) -> bool:
+        """Whether `note(key)` was called: a marker, so a caller need not read the entries to know what it did."""
+        return (self.dir / "noted" / sha256_hex(key.encode("utf-8"))).is_file()
+
+    def note(self, key: str) -> None:
+        marks = self.dir / "noted"
+        marks.mkdir(exist_ok=True)
+        (marks / sha256_hex(key.encode("utf-8"))).write_bytes(b"")
+
     def pending(self) -> list:
         out = []
         for p in sorted(self.dir.glob("*.json")):

@@ -27,6 +27,9 @@ META = {"artist_id": "ava", "run_id": "run_1", "checkpoint": "best", "serial": 6
 
 def test_a_bundle_is_content_addressed_and_reads_back_whole(tmp_path):
     files = _files(tmp_path)
+    # A symlinked source goes in as the file it points to.
+    (tmp_path / "src" / "linked.json").symlink_to(tmp_path / "src" / "rights.json")
+    files["artist/linked.json"] = tmp_path / "src" / "linked.json"
     m1 = B.write_bundle(tmp_path / "a.tar", files, META)
     m2 = B.write_bundle(tmp_path / "b.tar", files, {**META, "made_at_utc": "later"})
     assert m1["bundle_id"] == m2["bundle_id"], "when it was made is not part of the address"
@@ -34,6 +37,7 @@ def test_a_bundle_is_content_addressed_and_reads_back_whole(tmp_path):
     out = tmp_path / "out"
     manifest = B.read_bundle(tmp_path / "a.tar", out)
     assert manifest["serial"] == 65536 and (out / "artist" / "loras" / "run_1" / "adapter.safetensors").stat().st_size == 5000
+    assert (out / "artist" / "linked.json").is_file() and not (out / "artist" / "linked.json").is_symlink()
     assert json.loads((out / B.MANIFEST_NAME).read_text())["bundle_id"] == m1["bundle_id"]
     with pytest.raises(B.BundleError, match="exists"):
         B.read_bundle(tmp_path / "a.tar", out)
@@ -101,6 +105,9 @@ def test_a_tampered_or_hostile_bundle_leaves_nothing_behind(tmp_path):
     forged = rewrite("forged.tar", forged_id)
     with pytest.raises(B.BundleError, match="bundle id"):
         B.read_manifest(forged)
+    for bad in ("a\\..\\x", "C:x", "artist/../x"):
+        with pytest.raises(B.BundleError, match="not a bundle path"):
+            B._clean(bad)
     plain = tmp_path / "plain.tar"
     with tarfile.open(plain, "w") as t:
         t.add(str(tmp_path / "src" / "rights.json"), arcname="rights.json")

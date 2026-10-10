@@ -28,9 +28,13 @@ def _sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
+MAX_MANIFEST_BYTES = 4 << 20
+
+
 def _clean(arcname: str) -> str:
     p = PurePosixPath(arcname)
-    if p.is_absolute() or not p.parts or any(part in ("", ".", "..") for part in p.parts) or arcname.startswith("."):
+    if (p.is_absolute() or not p.parts or any(part in ("", ".", "..") for part in p.parts) or arcname.startswith(".")
+            or "\\" in arcname or ":" in arcname):
         raise BundleError(f"not a bundle path: {arcname!r}")
     return str(p)
 
@@ -74,7 +78,11 @@ def write_bundle(out_path: Path, files: dict, meta: dict, manifest: dict | None 
         info.size, info.mode = len(raw), 0o644
         tar.addfile(info, io.BytesIO(raw))
         for arcname in sorted(entries):
-            tar.add(str(files[arcname]), arcname=arcname, recursive=False)
+            src = Path(files[arcname])
+            info = tar.gettarinfo(str(src), arcname=arcname)
+            info.type, info.linkname, info.size, info.mode = tarfile.REGTYPE, "", src.stat().st_size, 0o644
+            with open(src, "rb") as fh:
+                tar.addfile(info, fh)
     tmp.replace(out_path)
     return manifest
 
@@ -85,6 +93,8 @@ def read_manifest(tar_path: Path) -> dict:
         first = tar.next()
         if first is None or first.name != MANIFEST_NAME or not first.isfile():
             raise BundleError(f"the bundle does not begin with {MANIFEST_NAME}")
+        if first.size > MAX_MANIFEST_BYTES:
+            raise BundleError("the manifest is too large to be one")
         fh = tar.extractfile(first)
         try:
             manifest = json.loads((fh.read() if fh else b"").decode("utf-8"))
@@ -103,6 +113,8 @@ def _checked_manifest(manifest) -> dict:
         _clean(arcname)
         if not isinstance(entry, dict) or not isinstance(entry.get("sha256"), str) or len(entry["sha256"]) != 64:
             raise BundleError(f"the manifest's entry for {arcname!r} carries no hash")
+        if isinstance(entry.get("size"), bool) or not isinstance(entry.get("size"), int) or entry["size"] < 0:
+            raise BundleError(f"the manifest's entry for {arcname!r} carries no size")
     if manifest.get("bundle_id") != bundle_id(files, manifest):
         raise BundleError("the bundle id does not match the manifest")
     for key in ("artist_id", "run_id"):
@@ -128,7 +140,7 @@ def read_bundle(tar_path: Path, dest: Path) -> dict:
                 if member.name == MANIFEST_NAME:
                     continue
                 name = _clean(member.name)
-                if not member.isfile() or member.issym() or member.islnk():
+                if not member.isfile() or member.issym() or member.islnk() or member.sparse:
                     raise BundleError(f"not a plain file: {member.name!r}")
                 if name not in files:
                     raise BundleError(f"a member the manifest does not name: {name!r}")
