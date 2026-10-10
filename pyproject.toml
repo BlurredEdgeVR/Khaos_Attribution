@@ -26,6 +26,8 @@ artwork = ["pillow>=10"]
 gradient = ["torch>=2.2"]
 # registry.py: Ed25519 for machine keys and the register's countersignature.
 registry = ["cryptography>=42"]
+# register_service: the register itself, on its own machine.
+service = ["cryptography>=42", "fastapi>=0.110", "uvicorn>=0.27"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
