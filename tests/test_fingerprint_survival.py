@@ -43,5 +43,7 @@ def test_the_bar_is_read_as_written(tmp_path):
     assert S.report(rows(0.96, 0, False), "t", tmp_path) == 0, "96% with 5 s clips at zero still passes: 5 s is reported, not counted"
     assert S.report(rows(0.94, 100, False), "t", tmp_path) == 1, "94% fails the 95% bar"
     assert S.report(rows(1.0, 100, True), "t", tmp_path) == 1, "one false match fails the bar"
+    broken = rows(1.0, 100, False) + [{"kind": "output", "file": "x", "transform": "mp3_128k", "error": "ffmpeg", "hit": False}]
+    assert S.report(broken, "t2", tmp_path) == 2 and not (tmp_path / "fingerprint-bar.t2.json").exists(), "an unmeasured row is no verdict"
     record = json.loads((tmp_path / "fingerprint-bar.t.json").read_text(encoding="utf-8"))
     assert record["false_matches"] and record["passed"] is False and record["per_transform"]["clip_5s_mid"]["counted"] is False

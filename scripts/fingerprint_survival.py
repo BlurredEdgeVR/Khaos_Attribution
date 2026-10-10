@@ -99,9 +99,11 @@ def run(outputs: list, decoys: list, machine: str, record_dir: Path) -> int:
         tmp = Path(td)
         for kind, files in (("output", outputs), ("decoy", decoys)):
             for i, src in enumerate(files):
+                work = tmp / f"{kind}{i}"
+                work.mkdir()
                 for name in TRANSFORMS:
                     try:
-                        q = fingerprint_array(*_read(transformed(src, name, tmp / f"{kind}{i}")))
+                        q = fingerprint_array(*_read(transformed(src, name, work)))
                     except Exception as exc:  # noqa: BLE001 — a transform that cannot be made is a row, not a crash
                         rows.append({"kind": kind, "file": src.name, "transform": name, "error": str(exc)[:200], "hit": False})
                         continue
@@ -121,6 +123,11 @@ def _read(p: Path):
 
 
 def report(rows: list, machine: str, record_dir: Path) -> int:
+    errors = [r for r in rows if "error" in r]
+    if errors:
+        # A row that could not be measured is not a miss; a verdict over it would be a false one.
+        print(f"measurement incomplete: {len(errors)} of {len(rows)} rows could not be made; first: {errors[0]['error'][:160]}")
+        return 2
     out_rows = [r for r in rows if r["kind"] == "output"]
     counted = [r for r in out_rows if r["transform"] not in NOT_COUNTED]
     per = {}
