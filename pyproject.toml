@@ -24,6 +24,8 @@ test = ["pytest>=7", "soundfile>=0.12", "pillow>=10"]  # fingerprint survival te
 artwork = ["pillow>=10"]
 # gradient.py: features of a live training module; the engine itself is found at run time.
 gradient = ["torch>=2.2"]
+# registry.py: Ed25519 for machine keys and the register's countersignature.
+registry = ["cryptography>=42"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

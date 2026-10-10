@@ -114,6 +114,26 @@ MACHINE_BANDS: dict[str, range] = {
     "threadripper": range(ARTIST_BAND_START + ARTIST_BANDS * ARTIST_BAND_SIZE, 2048),
 }
 
+# ---- the payload as a bucket: derived by the machine, never allocated ----
+# A model's payload is a hash of its machine key and run id into the payloads
+# outside the reserved 32; many models share one. The register's serial names
+# the model; the payload narrows a verify to one bucket of fingerprints.
+RESERVED_PAYLOADS = range(0, 32)
+DERIVED_PAYLOADS = range(32, PAYLOAD_SPACE)
+
+
+def derive_payload(machine_key_id: str, run_id: str) -> int:
+    """The bucket for a run: deterministic from the machine key id and the run id."""
+    import hashlib  # noqa: PLC0415
+    digest = hashlib.sha256(f"{machine_key_id}:{run_id}".encode("utf-8")).digest()
+    return DERIVED_PAYLOADS.start + int.from_bytes(digest[:8], "big") % len(DERIVED_PAYLOADS)
+
+
+def derive_watermark_id(machine_key_id: str, run_id: str) -> int:
+    """The codeword a run stamps: the derived bucket with its error-correcting bits."""
+    return encode_payload(derive_payload(machine_key_id, run_id))
+
+
 _LEGACY_IDS = None
 
 
