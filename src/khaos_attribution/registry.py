@@ -306,6 +306,25 @@ class RegisterClient:
         self.key = key
         self.timeout = timeout
 
+    def _get(self, path: str) -> dict:
+        import urllib.error  # noqa: PLC0415
+        import urllib.request  # noqa: PLC0415
+        try:
+            with urllib.request.urlopen(self.base_url + path, timeout=self.timeout) as r:
+                return json.loads(r.read().decode("utf-8") or "{}")
+        except urllib.error.HTTPError as e:
+            raise RegisterError(e.code, (e.read().decode("utf-8", "replace") or e.reason)[:400]) from None
+
+    def public_key(self) -> dict:
+        """The register's key id, public PEM and whether it is a development key; pin it at enrolment."""
+        return self._get("/api/public-key")
+
+    def model(self, serial: int) -> dict:
+        return self._get(f"/api/models/{int(serial)}")
+
+    def withdrawn(self) -> list:
+        return list(self._get("/api/withdrawn").get("withdrawn") or [])
+
     def _post(self, path: str, body: dict) -> dict:
         import urllib.error  # noqa: PLC0415
         import urllib.request  # noqa: PLC0415
@@ -332,13 +351,20 @@ class RegisterClient:
     def served(self, serial: int, space_url: str, state: str) -> dict:
         return self._post("/api/served", {"serial": serial, "space_url": space_url, "state": state, "nonce": secrets.token_hex(8)})
 
-    def sync(self, outbox: Outbox) -> list:
-        """Every pending entry, in order; stops at the first the register refuses so order is kept."""
+    def sync(self, outbox: Outbox, register_public_pem: str | None = None, on_answer=None) -> list:
+        """Every pending entry, in order; stops at the first the register refuses so order is kept.
+        With the register's pinned key, a publish answer whose countersignature is not that key's is refused
+        before it is marked sent; `on_answer(entry, answer)` runs for each accepted answer."""
         done = []
         for path, entry in outbox.pending():
             kind, body = entry["kind"], entry["body"]
             answer = {"publish": self.publish, "withdraw": lambda b: self.withdraw(**b),
                       "served": lambda b: self.served(**b)}[kind](body)
+            if kind == "publish" and register_public_pem is not None:
+                if not countersignature_valid(answer.get("countersignature") or {}, body["record_sha256"], register_public_pem):
+                    raise RegisterError(502, "the register's countersignature is not the pinned key's; nothing was marked sent")
+            if on_answer is not None:
+                on_answer(entry, answer)
             outbox.mark_sent(path, answer)
             done.append((entry["id"], answer))
         return done

@@ -112,6 +112,21 @@ def test_the_client_signs_every_body_and_syncs_in_order(monkeypatch, tmp_path):
     assert [c[0] for c in calls] == ["/api/records", "/api/served"] and len(done) == 2 and not box.pending()
 
 
+def test_sync_refuses_a_countersignature_that_is_not_the_pinned_keys(monkeypatch, tmp_path):
+    key, register, impostor = R.SigningKey.generate(), R.SigningKey.generate(), R.SigningKey.generate()
+    client = R.RegisterClient("https://register.example", key)
+    signed = R.sign_record(_record(), key)
+    monkeypatch.setattr(client, "_post", lambda path, body: {"serial": R.FIRST_SERIAL, "countersignature": R.countersign(signed, R.FIRST_SERIAL, impostor, "2026-10-10T00:00:00Z")})
+    box = R.Outbox(tmp_path); box.append("publish", signed)
+    with pytest.raises(R.RegisterError, match="pinned"):
+        client.sync(box, register_public_pem=register.public_pem())
+    assert len(box.pending()) == 1, "an unverified answer leaves the entry pending"
+    monkeypatch.setattr(client, "_post", lambda path, body: {"serial": R.FIRST_SERIAL, "countersignature": R.countersign(signed, R.FIRST_SERIAL, register, "2026-10-10T00:00:00Z")})
+    seen = []
+    client.sync(box, register_public_pem=register.public_pem(), on_answer=lambda e, a: seen.append(a["serial"]))
+    assert seen == [R.FIRST_SERIAL] and not box.pending()
+
+
 def test_the_real_client_speaks_http_to_a_live_register(tmp_path):
     """The client's own urllib call: headers, canonical bytes, error mapping, against the service on a socket."""
     pytest.importorskip("fastapi"); pytest.importorskip("uvicorn")
