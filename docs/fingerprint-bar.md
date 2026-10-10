@@ -1,0 +1,72 @@
+# The fingerprint bar
+
+Pre-registered 10 October 2026, before the measurement was run. The register
+plan ("One register, many rooms", decision 3) names outputs by fingerprint,
+and the index is built only if the fingerprint as it exists passes this bar.
+
+## The question
+
+Does the contract's fingerprint (`khaos_attribution.fingerprint`, format v1,
+a landmark constellation) still identify a released output after what
+released audio goes through, and does it refuse audio it has never seen?
+
+## The index
+
+Every rendered output on the measuring machine, fingerprinted from its
+original WAV. Nothing is excluded for being short, quiet or repetitive; the
+index is what the register would hold.
+
+## The transforms (the bar set)
+
+Re-encoding and clipping, as decided. Each output is pushed through each of:
+
+| name | what |
+|---|---|
+| `pcm_baseline` | the WAV re-written as 16-bit PCM |
+| `mp3_128k`, `mp3_320k` | MP3 at 128 and 320 kbit/s |
+| `aac_128k` | AAC at 128 kbit/s |
+| `opus_96k` | Opus at 96 kbit/s |
+| `vorbis_q4` | Vorbis quality 4 (the game-audio middleware's music codec) |
+| `resample_44k1` | resampled to 44.1 kHz |
+| `loudnorm` | loudness-normalised to −14 LUFS |
+| `clip_20s_mid`, `clip_10s_mid`, `clip_5s_mid` | an excerpt from the middle |
+| `mp3_128k_clip_10s` | MP3 128 kbit/s, then a 10 s excerpt from the middle |
+
+Pitch and tempo changes are not in the set: outputs altered that way get
+the weaker verify answer ("made by a registered model, one of these").
+
+## The decoys
+
+The catalogue's own tracks (ingested originals that no output is), pushed
+through the same transforms. None may match any output.
+
+## What is counted
+
+For each (output, transform): the query is matched against every entry in
+the index with `match_stats`; a hit is the top candidate being the right
+output AND `is_confident` AND dominance (top votes at least twice the
+runner-up's), the closed-set rule the module itself states.
+
+## The bar
+
+1. **Identification: at least 95% of (output, transform) pairs are hits**,
+   over the whole bar set, and **at least 90% for every transform on its
+   own**. Clips of 5 seconds are the one allowed exception: they are
+   reported but do not count against the bar, because a 5 s excerpt of
+   repetitive material is the module's documented limitation.
+2. **Refusal: no decoy, under any transform, is a hit against any output.**
+   A single false match fails the bar.
+3. Both numbers are reported with their counts, not rounded away.
+
+## If it fails
+
+The plan stops at phase 2. The two ways on are a decision, not a quiet
+change: narrow the bar set (the failing transforms go to the weaker
+answer), or replace the scheme. Either is recorded as an amendment to this
+file with the numbers that forced it.
+
+## Where
+
+`scripts/fingerprint_survival.py` runs it and writes the record beside this
+file as `fingerprint-bar.<machine>.json`. The first run is on the laptop
+(M2 Max, 198 outputs, 35 catalogue tracks on 10 October 2026).
