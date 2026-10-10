@@ -16,9 +16,11 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 
 from khaos_attribution import registry as R
+from khaos_attribution.watermark import decode_codeword
+from register_service.index import Index
 from register_service.store import Store, now_utc
 
-MAX_BODY = 2_000_000
+MAX_BODY = 8_000_000   # a long output's four-phase fingerprint runs to a few megabytes
 DEFAULT_PORT = 8912   # 8900 is the Engine Room's
 log = logging.getLogger("register_service")
 
@@ -58,11 +60,12 @@ def public_view(record: dict) -> dict:
 def create_app(cfg: dict | None = None) -> FastAPI:
     cfg = cfg or settings()
     store = Store(cfg["data"] / "register.sqlite3")
+    index = Index(cfg["data"] / "index.sqlite3")
     key = load_register_key(cfg)
     mirror = cfg["data"] / "mirror"
     (mirror / "models").mkdir(parents=True, exist_ok=True)
     app = FastAPI(title="Guild Register", docs_url=None, redoc_url=None)
-    app.state.store, app.state.key, app.state.cfg = store, key, cfg
+    app.state.store, app.state.index, app.state.key, app.state.cfg = store, index, key, cfg
 
     async def signed_body(request: Request, enrolling: bool = False) -> tuple:
         raw = await request.body()
@@ -200,6 +203,74 @@ def create_app(cfg: dict | None = None) -> FastAPI:
     dev_banner = ('<p style="background:#fbf1e6;color:#b4651b;padding:8px 12px;border-radius:6px">This register signs with a '
                   'development key. Nothing it countersigns is a Guild record.</p>' if cfg["dev_key"] else "")
 
+    @app.post("/api/outputs")
+    async def outputs(request: Request):
+        """A released output into the index, under its model's bucket: by the model's own account, or by a Space serving it."""
+        body, machine, key_id, _ = await signed_body(request)
+
+        def work():
+            rec = store.record(serial_of(body))
+            if not rec:
+                raise HTTPException(404, "no such model")
+            if rec["state"] == "withdrawn":
+                raise HTTPException(409, "the model is withdrawn; its outputs are not released into the index")
+            if machine["role"] == "workshop" and rec["account_id"] != machine["account_id"]:
+                raise HTTPException(403, "a Workshop releases outputs of its own account's models only")
+            if machine["role"] == "space" and not any(s["key_id"] == key_id and s["state"] == "serving" for s in rec["served"]):
+                raise HTTPException(403, "a Space releases outputs of the models it reports serving")
+            gid = str(body.get("generation_id") or "").strip()
+            if not gid or len(gid) > 120:
+                raise HTTPException(422, "generation_id is a short string")
+            try:
+                out = index.release(gid, rec["serial"], int(rec["signed"]["record"]["model"]["watermark_payload"]),
+                                    rec["signed"]["record"]["artist_id"], body.get("fingerprint"), key_id, machine["role"])
+            except ValueError as e:
+                raise HTTPException(422, str(e)) from None
+            return {k: out[k] for k in ("generation_id", "serial", "payload", "released_at", "landmarks", "already")}
+        return once(body, key_id, work)
+
+    @app.post("/api/verify")
+    async def verify(request: Request):
+        """Anyone's question, no key: a four-phase fingerprint and, when it read, the watermark codeword."""
+        raw = await request.body()
+        if len(raw) > MAX_BODY:
+            raise HTTPException(413, "too large")
+        try:
+            body = json.loads(raw)
+        except ValueError:
+            raise HTTPException(400, "not JSON") from None
+        if not isinstance(body, dict):
+            raise HTTPException(400, "the body must be a JSON object")
+        phases = body.get("phases")
+        if not isinstance(phases, list) or not phases or not all(isinstance(p, list) for p in phases):
+            raise HTTPException(422, "phases is a list of fingerprint lists")
+        try:
+            phases = [[(int(h), int(o)) for h, o in p] for p in phases]
+        except (TypeError, ValueError):
+            raise HTTPException(422, "a landmark is [hash, offset_ms]") from None
+        payload = None
+        codeword = body.get("watermark_id")
+        if codeword is not None:
+            try:
+                decoded = decode_codeword(int(codeword))
+            except (TypeError, ValueError):
+                decoded = None
+            if decoded is None:
+                raise HTTPException(422, "watermark_id is not a codeword")
+            payload = decoded[0]
+        answer = index.verify(phases, payload)
+        if answer["grade"] == "output":
+            rec = store.record(int(answer["output"]["serial"]))
+            answer["model"] = _model_summary(rec) if rec else None
+        elif answer["grade"] == "bucket":
+            answer["models"] = [_model_summary(store.record(s)) for s in store.serials_in_bucket(payload)]
+        return answer
+
+    def _model_summary(rec: dict) -> dict:
+        r = rec["signed"]["record"]
+        return {"serial": rec["serial"], "artist_id": r["artist_id"], "artist_name": r["artist_name"], "run_id": r["model"]["run_id"],
+                "state": rec["state"], "page": f"{cfg['public_url']}/models/{rec['serial']}"}
+
     @app.get("/api/public-key")
     def public_key():
         return {"register_key_id": key.key_id, "public_key_pem": key.public_pem(), "development": bool(cfg["dev_key"])}
@@ -261,6 +332,7 @@ artist attested, countersigned by the register and never edited.</p><p>{len(seri
 
     @app.get("/health")
     def health():
-        return JSONResponse({"ok": True, "ledger_ok": store.ledger_ok(), "models": len(store.serials()), "development": bool(cfg["dev_key"])})
+        return JSONResponse({"ok": True, "ledger_ok": store.ledger_ok(), "models": len(store.serials()), "outputs": index.count(),
+                             "development": bool(cfg["dev_key"])})
 
     return app

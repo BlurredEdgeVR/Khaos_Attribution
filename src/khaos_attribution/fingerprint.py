@@ -96,6 +96,26 @@ def fingerprint_array(audio, sample_rate: int) -> list:
     return out
 
 
+QUERY_PHASES = 4
+
+
+def query_phases(audio, sample_rate: int, phases: int = QUERY_PHASES) -> list:
+    """The query at `phases` sub-hop offsets: a clip starts anywhere on the analysis grid, and half a hop off it
+    keeps a twentieth of its votes. The stored fingerprint stays as it is; each candidate takes its best phase."""
+    hop = max(1, int(sample_rate * _HOP_S))
+    return [fingerprint_array(audio[k * hop // phases:], sample_rate) for k in range(phases)]
+
+
+def best_phase_stats(phases: list, candidate_fps: list) -> tuple:
+    """(votes, distinct) for a candidate against the query's best phase."""
+    return max((match_stats(q, candidate_fps) for q in phases), key=lambda t: t[0]) if phases else (0, 0)
+
+
+def dominant(votes: int, runner_up: int, ratio: float = 2.0) -> bool:
+    """The closed-set rule the module states: the best candidate at least `ratio` times the runner-up."""
+    return votes >= ratio * max(runner_up, 1)
+
+
 def fingerprint_file(path) -> list:
     import soundfile as sf
 

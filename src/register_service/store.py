@@ -187,6 +187,17 @@ class Store:
             self._ledger("served", serial, row["record_sha256"], key_id, {"space_url": space_url, "state": state})
             return {"serial": serial, "space_url": space_url, "state": state, "at": at}
 
+    def serials_in_bucket(self, payload: int) -> list:
+        """Every registered, not withdrawn model whose watermark bucket is this one."""
+        out = []
+        for row in self.db.execute("SELECT serial, signed_json FROM records WHERE state != 'withdrawn' ORDER BY serial"):
+            try:
+                if int(json.loads(row["signed_json"])["record"]["model"]["watermark_payload"]) == payload:
+                    out.append(row["serial"])
+            except (KeyError, TypeError, ValueError):
+                continue
+        return out
+
     def withdrawn_serials(self) -> list:
         return [r["serial"] for r in self.db.execute("SELECT serial FROM records WHERE state = 'withdrawn' ORDER BY serial")]
 

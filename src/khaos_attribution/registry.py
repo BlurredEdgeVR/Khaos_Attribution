@@ -373,6 +373,26 @@ class RegisterClient:
         """An outbox entry carries its nonce from the day it was written, so a retry is the same body, not a replay."""
         return self._post("/api/withdraw", {"serial": serial, "reason": reason, "nonce": nonce or secrets.token_hex(8)})
 
+    def release(self, generation_id: str, serial: int, fingerprint: list, nonce: str | None = None) -> dict:
+        """A released output's fingerprint into the index under its model's bucket."""
+        return self._post("/api/outputs", {"generation_id": generation_id, "serial": serial, "fingerprint": fingerprint,
+                                           "nonce": nonce or secrets.token_hex(8)})
+
+    def verify(self, phases: list, watermark_id: int | None = None) -> dict:
+        """Anyone's question: the four-phase fingerprint and the codeword when it read. No key."""
+        return self._post_public("/api/verify", {"phases": phases, "watermark_id": watermark_id})
+
+    def _post_public(self, path: str, body: dict) -> dict:
+        import urllib.error  # noqa: PLC0415
+        import urllib.request  # noqa: PLC0415
+        req = urllib.request.Request(self.base_url + path, data=canonical_bytes(body), method="POST",
+                                     headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=max(self.timeout, 60)) as r:
+                return json.loads(r.read().decode("utf-8") or "{}")
+        except urllib.error.HTTPError as e:
+            raise RegisterError(e.code, (e.read().decode("utf-8", "replace") or e.reason)[:400]) from None
+
     def served(self, serial: int, space_url: str, state: str, nonce: str | None = None) -> dict:
         return self._post("/api/served", {"serial": serial, "space_url": space_url, "state": state, "nonce": nonce or secrets.token_hex(8)})
 
@@ -385,7 +405,7 @@ class RegisterClient:
             kind, body = entry["kind"], entry["body"]
             try:
                 answer = {"publish": self.publish, "withdraw": lambda b: self.withdraw(**b),
-                          "served": lambda b: self.served(**b)}[kind](body)
+                          "served": lambda b: self.served(**b), "release": lambda b: self.release(**b)}[kind](body)
             except RegisterError as e:
                 # Not enrolled, a replay of another body, or the register itself failing: stop and keep order.
                 # A refusal of this entry for what it is (wrong account, no such serial, a record it will not take)
