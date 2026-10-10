@@ -345,11 +345,12 @@ class RegisterClient:
     def publish(self, signed: dict) -> dict:
         return self._post("/api/records", signed)
 
-    def withdraw(self, serial: int, reason: str) -> dict:
-        return self._post("/api/withdraw", {"serial": serial, "reason": reason, "nonce": secrets.token_hex(8)})
+    def withdraw(self, serial: int, reason: str, nonce: str | None = None) -> dict:
+        """An outbox entry carries its nonce from the day it was written, so a retry is the same body, not a replay."""
+        return self._post("/api/withdraw", {"serial": serial, "reason": reason, "nonce": nonce or secrets.token_hex(8)})
 
-    def served(self, serial: int, space_url: str, state: str) -> dict:
-        return self._post("/api/served", {"serial": serial, "space_url": space_url, "state": state, "nonce": secrets.token_hex(8)})
+    def served(self, serial: int, space_url: str, state: str, nonce: str | None = None) -> dict:
+        return self._post("/api/served", {"serial": serial, "space_url": space_url, "state": state, "nonce": nonce or secrets.token_hex(8)})
 
     def sync(self, outbox: Outbox, register_public_pem: str | None = None, on_answer=None) -> list:
         """Every pending entry, in order; stops at the first the register refuses so order is kept.
