@@ -213,7 +213,7 @@ def create_app(cfg: dict | None = None) -> FastAPI:
             if not rec:
                 raise HTTPException(404, "no such model")
             if rec["state"] == "withdrawn":
-                raise HTTPException(409, "the model is withdrawn; its outputs are not released into the index")
+                raise HTTPException(410, "the model is withdrawn; its outputs are not released into the index")
             if machine["role"] == "workshop" and rec["account_id"] != machine["account_id"]:
                 raise HTTPException(403, "a Workshop releases outputs of its own account's models only")
             if machine["role"] == "space" and not any(s["key_id"] == key_id and s["state"] == "serving" for s in rec["served"]):

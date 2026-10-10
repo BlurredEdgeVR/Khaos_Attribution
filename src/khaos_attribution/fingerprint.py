@@ -123,6 +123,14 @@ def fingerprint_file(path) -> list:
     return fingerprint_array(audio, sample_rate)
 
 
+def query_phases_file(path, phases: int = QUERY_PHASES) -> list:
+    """The four-phase query of a file, for asking the register's index."""
+    import soundfile as sf
+
+    audio, sample_rate = sf.read(str(path), dtype="float32", always_2d=True)
+    return query_phases(audio, sample_rate, phases)
+
+
 def match_stats(query_fps: list, candidate_fps: list) -> tuple:
     """(votes, distinct_hashes) for the best-aligned offset between two
     fingerprint lists (both [(hash, offset_ms)])."""

@@ -111,6 +111,8 @@ def test_verify_survives_mp3_when_ffmpeg_is_here(register, tmp_path):
     q, qsr = sf.read(str(back), dtype="float32", always_2d=True)
     answer = client.verify(query_phases(q[:, 0], qsr), None)
     assert answer["grade"] == "output" and answer["output"]["generation_id"] == "gen-3"
+    from khaos_attribution.fingerprint import query_phases_file
+    assert client.verify(query_phases_file(back), None)["output"]["generation_id"] == "gen-3"
 
 
 def test_a_withdrawn_models_outputs_are_not_released(register):
@@ -118,5 +120,9 @@ def test_a_withdrawn_models_outputs_are_not_released(register):
     key, client = _machine(register, "artist-one")
     serial = client.publish(_signed(key))["serial"]
     client.withdraw(serial, "x")
-    with pytest.raises(R.RegisterError, match="withdrawn"):
+    with pytest.raises(R.RegisterError, match="withdrawn") as e:
         client.release("gen-w", serial, fingerprint_array(*_music(4)))
+    assert e.value.status == 410, "a refusal of the entry for what it is: set aside by sync, never a jam"
+    box = R.Outbox(store.path.parent / "box")
+    box.append("release", {"generation_id": "gen-w2", "serial": serial, "fingerprint": fingerprint_array(*_music(5)), "nonce": "a1b2c3d4e5f60718"})
+    assert client.sync(box) == [] and len(box.refused()) == 1 and box.pending() == []
