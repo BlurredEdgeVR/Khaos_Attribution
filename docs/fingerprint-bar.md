@@ -82,3 +82,21 @@ one entry per distinct content (by file hash), which is what a register
 would hold. The bar, the transforms and the decoys are unchanged. The
 first run's numbers (792 of 2,244 before deduplication, no false matches)
 are kept in git history; the record file is the rerun's.
+
+## Amendment 2 (10 October 2026, after the second run)
+
+Second run, one entry per content: 1,136 of 1,188 pairs (95.6%), no false
+matches, every transform at or above 90% except the 20 s clip at 74 of 108.
+The cause is not clip length but where a clip starts: the fingerprint lays
+its analysis frames on a fixed 46.5 ms grid, and a clip that starts half a
+hop off the grid keeps about a twentieth of its votes (147 against 2,322
+for a start 20 ms later, on one output). The 20 s transform happened to
+start exactly half a hop off; the 10 s transform happened to land near the
+grid. A released clip starts anywhere, so the bar must hold at any phase.
+
+The remedy is on the query side and leaves the stored format and every
+index untouched: a query is fingerprinted at four sub-hop offsets and each
+candidate is scored by its best phase (worst case on that output: 147 to
+2,395 votes). The bar, the transforms and the decoys are unchanged; the
+third run measures the four-phase matcher. If adopted, it is the matcher
+the index service uses.

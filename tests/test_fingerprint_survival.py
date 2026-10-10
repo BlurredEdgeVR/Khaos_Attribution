@@ -27,8 +27,11 @@ def test_a_hit_needs_the_right_winner_confidence_and_dominance():
 
 def test_best_match_ranks_the_whole_index_and_names_the_runner_up():
     index = {"a": _fps(1), "b": _fps(2), "c": _fps(3)}
-    winner, votes, distinct, runner = S.best_match(_fps(2), index)
+    winner, votes, distinct, runner = S.best_match([_fps(2)], index)
     assert winner == "b" and votes == 60 and distinct == 60 and runner == 0
+    # a candidate takes its best phase: a query whose second phase is the one that lines up still wins
+    winner, votes, _, _ = S.best_match([_fps(9), _fps(2)], index)
+    assert winner == "b" and votes == 60
 
 
 def test_the_bar_is_read_as_written(tmp_path):
