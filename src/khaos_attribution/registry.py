@@ -288,6 +288,15 @@ class Outbox:
         """An entry the register refused for what it is (not for being unreachable): set aside, never retried."""
         self._move(path, "refused", answer)
 
+    def sent_entries(self) -> list:
+        out = []
+        for p in sorted((self.dir / "sent").glob("*.json")):
+            try:
+                out.append(json.loads(p.read_text(encoding="utf-8")))
+            except (OSError, ValueError):
+                continue
+        return out
+
     def refused(self) -> list:
         out = []
         for p in sorted((self.dir / "refused").glob("*.json")):
