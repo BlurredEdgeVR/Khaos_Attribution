@@ -3,6 +3,7 @@
 # BACKUP_TARGET over ssh when one is set. Run as the register user; the environment comes from /etc/register.env.
 set -euo pipefail
 DATA="${REGISTER_DATA_DIR:?}"
+cd "$(dirname "$DATA")"
 OUT="$(dirname "$DATA")/backups"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 WORK="$(mktemp -d)"

@@ -4,6 +4,7 @@
 # /etc/register.env and ~/.ssh/ledger_deploy. Nothing but mirror files ever goes in.
 set -euo pipefail
 DATA="${REGISTER_DATA_DIR:?}"
+cd "$(dirname "$DATA")"
 REPO="${LEDGER_REPO:-}"
 CLONE="$(dirname "$DATA")/ledger-mirror"
 [ -n "$REPO" ] || { echo "LEDGER_REPO is not set; nothing mirrored"; exit 0; }
