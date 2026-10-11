@@ -257,3 +257,20 @@ def test_the_ceremony_makes_a_key_once_and_records_it_in_the_ledger_never_a_deve
     entries = Store(tmp_path / "data" / "register.sqlite3").ledger()
     assert entries[-1]["kind"] == "key" and entries[-1]["detail"]["present"] == ["Ava Guardian", "Ben Guardian"]
     assert len(entries[-1]["detail"]["public_key_sha256"]) == 64 and entries[-1]["key_id"] == out.split()[2]
+
+
+def test_the_public_doors_take_a_bounded_number_of_calls_a_minute_per_address(register):
+    """verify and enrol are rate-limited per client address; a signed call has its own, higher bound; the limit
+    answers 429 with Retry-After and refills with time."""
+    from register_service.app import PUBLIC_LIMITS, RateLimit
+    app, store, http = register
+    bad = {"phases": [[[1, 2]]]}
+    codes = [http.post("/api/verify", json=bad).status_code for _ in range(PUBLIC_LIMITS["/api/verify"] + 3)]
+    assert codes[: PUBLIC_LIMITS["/api/verify"]] == [200] * PUBLIC_LIMITS["/api/verify"] and codes[-1] == 429
+    r = http.post("/api/verify", json=bad)
+    assert r.status_code == 429 and r.headers["retry-after"] == "60"
+    assert http.get("/api/withdrawn").status_code == 200, "reads are never limited"
+    assert http.post("/api/verify", json=bad, headers={"X-Forwarded-For": "203.0.113.9"}).status_code == 200, "another address, its own bucket"
+    bucket = RateLimit(6)
+    assert all(bucket.allow("a", now=0.0) for _ in range(6)) and not bucket.allow("a", now=0.0)
+    assert bucket.allow("a", now=10.0), "refills at the rate: one token every ten seconds at six a minute"

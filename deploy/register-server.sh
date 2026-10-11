@@ -26,6 +26,15 @@ apt-get update -q
 apt-get install -y -q unattended-upgrades ufw fail2ban git curl sqlite3 rsync debian-keyring debian-archive-keyring apt-transport-https ca-certificates
 dpkg-reconfigure -f noninteractive unattended-upgrades
 
+echo "== ssh: keys only"
+cat > /etc/ssh/sshd_config.d/90-register.conf <<SSHD
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitRootLogin prohibit-password
+MaxAuthTries 3
+SSHD
+sshd -t && systemctl reload ssh
+
 echo "== firewall"
 ufw --force reset >/dev/null
 ufw default deny incoming
@@ -172,7 +181,17 @@ $DOMAIN {
 	request_body {
 		max_size 10MB
 	}
-	reverse_proxy 127.0.0.1:$PORT
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+		Content-Security-Policy "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'"
+		-Server
+	}
+	reverse_proxy 127.0.0.1:$PORT {
+		header_down -Server
+	}
 }
 CADDY
 

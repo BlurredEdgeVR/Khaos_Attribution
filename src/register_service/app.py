@@ -9,6 +9,8 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
+import time
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, Response
@@ -54,6 +56,32 @@ def public_view(record: dict) -> dict:
         for t in tracks:
             t.pop("writers", None)
     return out
+
+
+class RateLimit:
+    """A token bucket per client address: the public doors take a bounded number of calls a minute each."""
+
+    def __init__(self, per_minute: int):
+        self.per_minute, self._buckets, self._lock = per_minute, {}, threading.Lock()
+
+    def allow(self, client: str, now: float | None = None) -> bool:
+        now = time.time() if now is None else now
+        with self._lock:
+            tokens, last = self._buckets.get(client, (float(self.per_minute), now))
+            tokens = min(float(self.per_minute), tokens + (now - last) * self.per_minute / 60.0)
+            if tokens < 1.0:
+                self._buckets[client] = (tokens, now)
+                return False
+            self._buckets[client] = (tokens - 1.0, now)
+            if len(self._buckets) > 10000:
+                stale = [k for k, (_, t) in self._buckets.items() if now - t > 600]
+                for k in stale:
+                    del self._buckets[k]
+            return True
+
+
+PUBLIC_LIMITS = {"/api/verify": 20, "/api/enrol": 6}
+SIGNED_LIMIT = 120
 
 
 def create_app(cfg: dict | None = None) -> FastAPI:
@@ -119,6 +147,21 @@ def create_app(cfg: dict | None = None) -> FastAPI:
             write_mirror(serial)
         except Exception as exc:  # noqa: BLE001
             log.error("mirror not written for %s: %s", serial, exc)
+
+    limits = {path: RateLimit(n) for path, n in PUBLIC_LIMITS.items()}
+    signed_limit = RateLimit(SIGNED_LIMIT)
+
+    @app.middleware("http")
+    async def rate_limited(request: Request, call_next):
+        # Behind Caddy the client is the first forwarded address; on loopback it is the socket's.
+        client = (request.headers.get("x-forwarded-for", "").split(",")[0].strip() or (request.client.host if request.client else "?"))
+        path = request.url.path
+        if request.method == "POST":
+            bucket = limits.get(path) or (signed_limit if path.startswith("/api/") else None)
+            if bucket is not None and not bucket.allow(client):
+                return JSONResponse({"detail": "too many requests from this address; try again in a minute"}, status_code=429,
+                                    headers={"Retry-After": "60"})
+        return await call_next(request)
 
     @app.post("/api/enrol")
     async def enrol(request: Request):
