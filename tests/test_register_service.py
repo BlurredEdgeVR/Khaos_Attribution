@@ -271,6 +271,9 @@ def test_the_public_doors_take_a_bounded_number_of_calls_a_minute_per_address(re
     assert r.status_code == 429 and r.headers["retry-after"] == "60"
     assert http.get("/api/withdrawn").status_code == 200, "reads are never limited"
     assert http.post("/api/verify", json=bad, headers={"X-Forwarded-For": "203.0.113.9"}).status_code == 200, "another address, its own bucket"
+    # The proxy appends the real address last; a forged first entry does not buy a fresh bucket.
+    forged = [http.post("/api/verify", json=bad, headers={"X-Forwarded-For": f"10.0.0.{i}, 203.0.113.9"}).status_code for i in range(30)]
+    assert 429 in forged
     bucket = RateLimit(6)
     assert all(bucket.allow("a", now=0.0) for _ in range(6)) and not bucket.allow("a", now=0.0)
     assert bucket.allow("a", now=10.0), "refills at the rate: one token every ten seconds at six a minute"

@@ -153,8 +153,8 @@ def create_app(cfg: dict | None = None) -> FastAPI:
 
     @app.middleware("http")
     async def rate_limited(request: Request, call_next):
-        # Behind Caddy the client is the first forwarded address; on loopback it is the socket's.
-        client = (request.headers.get("x-forwarded-for", "").split(",")[0].strip() or (request.client.host if request.client else "?"))
+        # Caddy appends the real address to whatever the client sent, so the LAST entry is the one to trust.
+        client = (request.headers.get("x-forwarded-for", "").split(",")[-1].strip() or (request.client.host if request.client else "?"))
         path = request.url.path
         if request.method == "POST":
             bucket = limits.get(path) or (signed_limit if path.startswith("/api/") else None)
