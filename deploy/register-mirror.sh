@@ -28,7 +28,8 @@ if git -C "$CLONE" diff --cached --quiet; then
   echo "mirror unchanged"
   exit 0
 fi
-entries="$(wc -l < "$DATA/mirror/ledger.jsonl" 2>/dev/null || echo 0)"
+entries=0
+[ -f "$DATA/mirror/ledger.jsonl" ] && entries="$(wc -l < "$DATA/mirror/ledger.jsonl")"
 git -C "$CLONE" commit -q -m "Ledger at $entries entries, $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 git -C "$CLONE" push -q origin "$default"
 echo "mirror pushed: $entries ledger entries"
