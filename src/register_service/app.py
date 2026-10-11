@@ -6,7 +6,6 @@ only), REGISTER_PUBLIC_URL.
 
 from __future__ import annotations
 
-import html
 import json
 import logging
 import os
@@ -200,8 +199,6 @@ def create_app(cfg: dict | None = None) -> FastAPI:
             return out
         return once(body, key_id, work)
 
-    dev_banner = ('<p style="background:#fbf1e6;color:#b4651b;padding:8px 12px;border-radius:6px">This register signs with a '
-                  'development key. Nothing it countersigns is a Guild record.</p>' if cfg["dev_key"] else "")
 
     @app.post("/api/outputs")
     async def outputs(request: Request):
@@ -293,42 +290,66 @@ def create_app(cfg: dict | None = None) -> FastAPI:
 
     @app.get("/models/{serial}", response_class=HTMLResponse)
     def model_page(serial: int):
+        from register_service import pages as P  # noqa: PLC0415
         rec = store.record(serial)
         if not rec:
             raise HTTPException(404, "no such model")
         r = public_view(rec["signed"]["record"])
         m, ts = r["model"], r["training_set"]
-        rows = [("Register number", str(serial)), ("Artist", r["artist_name"]), ("Registered", rec["published_at"]),
-                ("State", rec["state"]), ("Base model", f"{m['base_model']} ({m['base_model_licence']})"),
-                ("Adapter", m["adapter_sha256"]), ("Model card", m["card_sha256"]),
-                ("Dataset hash", r["provenance"]["dataset_hash"]), ("Watermark bucket", str(m["watermark_payload"])),
-                ("Countersigned by", rec["countersignature"]["register_key_id"])]
-        tracks = "".join(f"<li>{html.escape(t.get('title') or t['track_id'])}"
-                         + (" · " + ", ".join(f"{html.escape(w['name'])} {w['share']:.0%}" for w in t.get("writers", [])) if t.get("writers") else "")
-                         + "</li>" for t in ts.get("tracks", []))
-        served = "".join(f"<li>{html.escape(s['space_url'])} · {s['state']} · {s['at']}</li>" for s in rec["served"])
-        body = "".join(f"<tr><th>{html.escape(k)}</th><td>{html.escape(v)}</td></tr>" for k, v in rows)
-        note = ("This page records what the artist's Workshop attested, bound to hashes the artist's own machine can "
-                "reproduce. The register cannot see the audio and does not verify the claim; it makes it checkable.")
-        return f"""<!doctype html><meta charset="utf-8"><title>Guild Register · {serial}</title>
-<style>body{{font:16px/1.5 system-ui,sans-serif;max-width:720px;margin:40px auto;padding:0 20px;color:#141a1b}}
-th{{text-align:left;padding:4px 12px 4px 0;vertical-align:top;white-space:nowrap}}td{{word-break:break-all}}h1{{font-size:1.6rem}}
-p.note{{color:#5a6668;font-size:0.95rem}}</style>
-{dev_banner}<h1>Register No. {serial}</h1><table>{body}</table>
-{'<h2>Trained on</h2><ul>' + tracks + '</ul>' if tracks else f'<p>Trained on {ts.get("track_count", 0)} tracks (the artist shows the model alone).</p>'}
-{'<h2>Served at</h2><ul>' + served + '</ul>' if served else ''}
-<p class="note">{note}</p>
-<p><a href="/api/models/{serial}">The record as JSON</a> · <a href="/api/ledger">The ledger</a></p>"""
+        tracks = ts.get("tracks") or []
+        facts = [P.state_chip(rec["state"]), f"registered {P.esc(P.day(rec['published_at']))}", P.esc(m["base_model"]),
+                 P.count(len(tracks) or ts.get("track_count", 0), "track")]
+        note = ("What the artist's Workshop attested, bound to hashes the artist's own machine can reproduce. The register cannot "
+                "see the audio and does not verify the claim; it makes it checkable.")
+        body = P.hero(f"Register No. {serial}", r["artist_name"], note, facts, P.seal_for(serial, rec["signed"]["record"]))
+        kv = [("Base model", f"{P.esc(m['base_model'])} <span class=\"muted\">· {P.esc(m['base_model_licence'])} licence</span>"),
+              ("Adapter", f'<span class="mono">{P.esc(m["adapter_sha256"])}</span>'),
+              ("Model card", f'<span class="mono">{P.esc(m["card_sha256"])}</span>'),
+              ("Dataset hash", f'<span class="mono">{P.esc(r["provenance"]["dataset_hash"])}</span>'),
+              ("Watermark bucket", P.esc(m["watermark_payload"])),
+              ("Countersigned by", f'<span class="mono">{P.esc(rec["countersignature"]["register_key_id"])}</span>'),
+              ("Registered", P.esc(rec["published_at"]))]
+        body += P.section("The record", "every value as the artist's Workshop attested it")
+        body += P.table("200px minmax(0, 1fr)", ["", ""], [[(f'<span class="stage-kv-label">{P.esc(k)}</span>', ""), (v, "wrap")] for k, v in kv])
+        if tracks:
+            rows = []
+            for i, t in enumerate(tracks, 1):
+                writers = ", ".join(f"{P.esc(w['name'])} {w['share']:.0%}" for w in t.get("writers", [])) or '<span class="muted">—</span>'
+                rows.append([(str(i), "num"), P.esc(t.get("title") or t["track_id"]), (writers, "muted")])
+            body += P.section("Trained on", P.count(len(tracks), "track"))
+            body += P.table("44px minmax(0, 1fr) minmax(0, 1fr)", ["#", "Track", "Writers"], rows)
+        else:
+            body += P.section("Trained on", "the artist shows the model alone")
+            body += f'<div class="empty">{P.count(ts.get("track_count", 0), "track")}; the artist chose not to list them.</div>'
+        if rec["served"]:
+            body += P.section("Served at")
+            body += P.table("minmax(0, 1fr) 120px 160px", ["Listening Space", "State", "Since"],
+                            [[(f'<a href="{P.esc(s_["space_url"])}">{P.esc(s_["space_url"])}</a>', "wrap"), (P.esc(s_["state"]), "muted"), (P.esc(P.day(s_["at"])), "muted")]
+                             for s_ in rec["served"]])
+        body += f'<div class="stage-pill-row"><a class="k-btn k-btn--pill" href="/api/models/{serial}">The record as JSON</a></div>'
+        return P.page(f"Register No. {serial} · {r['artist_name']}", body, dev=bool(cfg["dev_key"]))
 
     @app.get("/", response_class=HTMLResponse)
     def home():
+        from register_service import pages as P  # noqa: PLC0415
         serials = store.serials()
-        items = "".join(f'<li><a href="/models/{s}">Register No. {s}</a></li>' for s in serials[-50:][::-1])
-        return f"""<!doctype html><meta charset="utf-8"><title>Guild Register</title>
-<style>body{{font:16px/1.5 system-ui,sans-serif;max-width:720px;margin:40px auto;padding:0 20px}}</style>
-{dev_banner}<h1>The Guild Register</h1><p>The public ledger of registered fine-tuned models: what each was trained on, as its
-artist attested, countersigned by the register and never edited.</p><p>{len(serials)} models registered.</p>
-<ul>{items}</ul><p><a href="/api/ledger">The ledger</a> · <a href="/api/public-key">The register's public key</a></p>"""
+        rows = []
+        for serial in serials[-100:][::-1]:
+            rec = store.record(serial)
+            if not rec:
+                continue
+            r = rec["signed"]["record"]
+            rows.append((f"/models/{serial}", [(str(serial), "num"), P.esc(r["artist_name"]), (P.esc(P.day(rec["published_at"])), "muted"),
+                                                (P.state_chip(rec["state"]), "")]))
+        para = ("The public ledger of registered fine-tuned models: what each was trained on, as its artist attested, "
+                "countersigned by the register and never edited.")
+        facts = [P.count(len(serials), "model") + " registered", "ledger unbroken" if store.ledger_ok() else "ledger BROKEN",
+                 "serials from 65,536"]
+        body = P.hero("The Guild of Fine Tuners", "The Guild Register.", para, facts)
+        body += P.section("Registered models", "newest first")
+        body += (P.table("80px minmax(0, 1fr) 120px 120px", ["No.", "Artist", "Registered", "State"], rows) if rows
+                 else '<div class="empty">No model is registered yet.</div>')
+        return P.page("Guild Register", body, dev=bool(cfg["dev_key"]))
 
     @app.get("/health")
     def health():
