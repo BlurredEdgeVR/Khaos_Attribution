@@ -10,9 +10,13 @@ WORK="$(mktemp -d)"
 tar -C "$WORK" -xzf "$ARCHIVE"
 systemctl stop register.service
 for db in register index; do
-  [ -f "$WORK/$db.sqlite3" ] && install -o register -g register -m 640 "$WORK/$db.sqlite3" "$DATA/$db.sqlite3"
+  if [ -f "$WORK/$db.sqlite3" ]; then
+    # The copy is a whole database; a write-ahead log left from the old one must not be replayed over it.
+    rm -f "$DATA/$db.sqlite3-wal" "$DATA/$db.sqlite3-shm"
+    install -o register -g register -m 640 "$WORK/$db.sqlite3" "$DATA/$db.sqlite3"
+  fi
 done
 if [ -d "$WORK/mirror" ]; then rm -rf "$DATA/mirror"; cp -a "$WORK/mirror" "$DATA/mirror"; chown -R register:register "$DATA/mirror"; fi
 rm -rf "$WORK"
 systemctl start register.service
-sudo -u register env "$(grep -v '^#' /etc/register.env | xargs)" /srv/register/venv/bin/python -m register_service check
+sudo -u register bash -c 'set -a; . /etc/register.env; set +a; cd /srv/register && exec venv/bin/python -m register_service check'

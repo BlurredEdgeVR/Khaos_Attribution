@@ -42,7 +42,7 @@ What the code can and cannot do, said plainly: the service signs from a PEM file
    ```
 3. Record the ceremony as the ledger's entry:
    ```
-   sudo -u register env $(grep -v '^#' /etc/register.env | xargs) /srv/register/venv/bin/python -m register_service key --present "Name, Name" --note "first ceremony"
+   register-cli key --present "Name, Name" --note "first ceremony"
    ```
    The entry carries the key id, the public key's hash and the names. It is in the public ledger from then on.
 4. Wipe the SERVER stick.

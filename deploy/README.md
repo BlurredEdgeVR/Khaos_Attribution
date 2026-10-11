@@ -16,7 +16,7 @@ What it leaves behind:
 - `register-backup.timer`: nightly at 03:30, a consistent copy of both databases and the mirror into `backups/`, kept 30 days, sent to `BACKUP_TARGET` over ssh when one is set in `/etc/register.env` (a Hetzner Storage Box takes rsync over ssh on port 23). The key is never in a backup.
 - `register-restore.sh <archive>`: the way back, ending with the ledger check.
 
-Accounts and invites are made on the server as the service user; the script prints the two commands. An invite is a one-time string handed to one machine.
+Accounts and invites are made on the server with `register-cli account <name>` and `register-cli invite <name> --role workshop|space` (the register's commands as the service user, with its settings). An invite is a one-time string handed to one machine.
 
 ## The key
 

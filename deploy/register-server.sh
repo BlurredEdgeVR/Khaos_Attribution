@@ -185,6 +185,12 @@ curl -fsS "http://127.0.0.1:$PORT/health" && echo
 echo
 echo "Backup key (install on the storage box):   $(cat $HOME_DIR/.ssh/id_ed25519.pub)"
 echo "Ledger deploy key (add to the repository, write access):   $(cat $HOME_DIR/.ssh/ledger_deploy.pub)"
-echo "Done. Next: the first account and invites, as the service user:"
-echo "  sudo -u $USER_NAME env \$(grep -v '^#' $ENV_FILE | xargs) $VENV/bin/python -m register_service account <name>"
-echo "  sudo -u $USER_NAME env \$(grep -v '^#' $ENV_FILE | xargs) $VENV/bin/python -m register_service invite <name> --role workshop"
+cat > /usr/local/bin/register-cli <<CLI
+#!/usr/bin/env bash
+# The register's commands as the service user with its settings: register-cli account <name> | invite <name> [--role space] | check | key ...
+exec sudo -u $USER_NAME bash -c 'set -a; . $ENV_FILE; set +a; cd $HOME_DIR && exec $VENV/bin/python -m register_service "\$@"' -- "\$@"
+CLI
+chmod 755 /usr/local/bin/register-cli
+echo "Done. Next: the first account and invites:"
+echo "  register-cli account <name>"
+echo "  register-cli invite <name> --role workshop"
