@@ -55,7 +55,7 @@ sudo -u "$USER_NAME" -H bash -c '
   cd "$HOME"
   [ -x "$HOME/.local/bin/uv" ] || curl -LsSf https://astral.sh/uv/install.sh | sh >/dev/null
   export PATH="$HOME/.local/bin:$PATH"
-  if [ -d "'"$CHECKOUT"'/.git" ]; then git -C "'"$CHECKOUT"'" fetch -q --tags origin; else git clone -q "'"$REPO"'" "'"$CHECKOUT"'"; fi
+  if [ -d "'"$CHECKOUT"'/.git" ]; then git -C "'"$CHECKOUT"'" fetch -q --tags --force origin; else git clone -q "'"$REPO"'" "'"$CHECKOUT"'"; fi
   git -C "'"$CHECKOUT"'" checkout -q --detach "'"$TAG"'"
   [ -d "'"$VENV"'" ] || uv venv -q --python 3.12 "'"$VENV"'"
   uv pip install -q --reinstall-package khaos-attribution --python "'"$VENV"'/bin/python" "'"$CHECKOUT"'[registry,service]"
