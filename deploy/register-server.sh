@@ -52,6 +52,7 @@ chmod 750 "$HOME_DIR"
 echo "== uv and the code at $TAG"
 sudo -u "$USER_NAME" -H bash -c '
   set -euo pipefail
+  cd "$HOME"
   [ -x "$HOME/.local/bin/uv" ] || curl -LsSf https://astral.sh/uv/install.sh | sh >/dev/null
   export PATH="$HOME/.local/bin:$PATH"
   if [ -d "'"$CHECKOUT"'/.git" ]; then git -C "'"$CHECKOUT"'" fetch -q --tags origin; else git clone -q "'"$REPO"'" "'"$CHECKOUT"'"; fi
