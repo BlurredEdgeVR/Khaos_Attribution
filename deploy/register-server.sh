@@ -72,6 +72,8 @@ REGISTER_DEV_KEY=1
 # The storage box for the nightly backup, as user@host:path over ssh (Hetzner: port 23); empty keeps backups local only.
 BACKUP_TARGET=
 BACKUP_PORT=23
+# The public ledger mirror's repository (ssh address), pushed with ~register/.ssh/ledger_deploy; empty mirrors nothing.
+LEDGER_REPO=
 ENV
   chmod 640 "$ENV_FILE"; chown root:"$USER_NAME" "$ENV_FILE"
 fi
@@ -131,6 +133,38 @@ Persistent=true
 WantedBy=timers.target
 UNIT
 
+install -m 755 "$(dirname "$0")/register-mirror.sh" /usr/local/bin/register-mirror
+cat > /etc/systemd/system/register-mirror.service <<UNIT
+[Unit]
+Description=Push the Guild Register's public mirror
+
+[Service]
+Type=oneshot
+User=$USER_NAME
+EnvironmentFile=$ENV_FILE
+ExecStart=/usr/local/bin/register-mirror
+UNIT
+cat > /etc/systemd/system/register-mirror.timer <<UNIT
+[Unit]
+Description=The Guild Register's public mirror, every quarter hour
+
+[Timer]
+OnCalendar=*:0/15
+RandomizedDelaySec=2m
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+UNIT
+
+echo "== keys for the backup and the mirror (made once; the public halves are printed at the end)"
+sudo -u "$USER_NAME" -H bash -c '
+  set -euo pipefail
+  mkdir -p "$HOME/.ssh" && chmod 700 "$HOME/.ssh"
+  [ -f "$HOME/.ssh/id_ed25519" ] || ssh-keygen -q -t ed25519 -N "" -C "register-backup" -f "$HOME/.ssh/id_ed25519"
+  [ -f "$HOME/.ssh/ledger_deploy" ] || ssh-keygen -q -t ed25519 -N "" -C "guild-register-ledger-deploy" -f "$HOME/.ssh/ledger_deploy"
+'
+
 echo "== caddy site"
 cat > /etc/caddy/Caddyfile <<CADDY
 $DOMAIN {
@@ -143,12 +177,14 @@ $DOMAIN {
 CADDY
 
 systemctl daemon-reload
-systemctl enable --now register.service register-backup.timer
+systemctl enable --now register.service register-backup.timer register-mirror.timer
 systemctl restart caddy
 sleep 2
 systemctl --no-pager --quiet is-active register.service && echo "register: running" || { journalctl -u register.service --no-pager -n 30; exit 1; }
 curl -fsS "http://127.0.0.1:$PORT/health" && echo
 echo
+echo "Backup key (install on the storage box):   $(cat $HOME_DIR/.ssh/id_ed25519.pub)"
+echo "Ledger deploy key (add to the repository, write access):   $(cat $HOME_DIR/.ssh/ledger_deploy.pub)"
 echo "Done. Next: the first account and invites, as the service user:"
 echo "  sudo -u $USER_NAME env \$(grep -v '^#' $ENV_FILE | xargs) $VENV/bin/python -m register_service account <name>"
 echo "  sudo -u $USER_NAME env \$(grep -v '^#' $ENV_FILE | xargs) $VENV/bin/python -m register_service invite <name> --role workshop"
