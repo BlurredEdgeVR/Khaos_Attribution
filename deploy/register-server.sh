@@ -58,7 +58,7 @@ sudo -u "$USER_NAME" -H bash -c '
   if [ -d "'"$CHECKOUT"'/.git" ]; then git -C "'"$CHECKOUT"'" fetch -q --tags origin; else git clone -q "'"$REPO"'" "'"$CHECKOUT"'"; fi
   git -C "'"$CHECKOUT"'" checkout -q --detach "'"$TAG"'"
   [ -d "'"$VENV"'" ] || uv venv -q --python 3.12 "'"$VENV"'"
-  uv pip install -q --python "'"$VENV"'/bin/python" "'"$CHECKOUT"'[registry,service]"
+  uv pip install -q --reinstall-package khaos-attribution --python "'"$VENV"'/bin/python" "'"$CHECKOUT"'[registry,service]"
 '
 
 echo "== settings"
