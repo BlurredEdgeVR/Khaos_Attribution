@@ -4,6 +4,8 @@
     python -m register_service invite <account> [--role workshop|space]
     python -m register_service revoke <machine_key_id> <reason>
     python -m register_service check
+    python -m register_service make-key <path>            a new countersigning key, on the ceremony's machine
+    python -m register_service key --present "A, B, C"    the ledger's record of the key the service now signs with
 """
 
 import argparse
@@ -21,8 +23,20 @@ def main(argv=None) -> int:
     i = sub.add_parser("invite"); i.add_argument("account"); i.add_argument("--role", choices=("workshop", "space"), default="workshop")
     r = sub.add_parser("revoke"); r.add_argument("key_id"); r.add_argument("reason")
     sub.add_parser("check")
+    sub.add_parser("make-key").add_argument("path")
+    k = sub.add_parser("key"); k.add_argument("--present", required=True, help="who was there, comma-separated"); k.add_argument("--note", default="")
     a = p.parse_args(argv)
     cfg = settings()
+    if a.cmd == "make-key":
+        from pathlib import Path  # noqa: PLC0415
+        from khaos_attribution.registry import SigningKey  # noqa: PLC0415
+        path = Path(a.path)
+        if path.exists():
+            raise SystemExit(f"{path} exists; a key is made once")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        key = SigningKey.load_or_create(path)
+        print(f"key id {key.key_id}\n{key.public_pem()}", end="")
+        return 0
     if a.cmd == "serve":
         import uvicorn  # noqa: PLC0415
         if cfg["dev_key"] and a.host not in ("127.0.0.1", "localhost", "::1"):
@@ -37,6 +51,13 @@ def main(argv=None) -> int:
         print(store.create_invite(a.account, a.role))
     elif a.cmd == "revoke":
         store.revoke_machine(a.key_id, a.reason); print("revoked")
+    elif a.cmd == "key":
+        from register_service.app import load_register_key  # noqa: PLC0415
+        if cfg["dev_key"]:
+            raise SystemExit("REGISTER_DEV_KEY is set: a development key is never recorded as the Guild's")
+        key = load_register_key(cfg)
+        store.record_key(key.key_id, key.public_pem(), [x.strip() for x in a.present.split(",") if x.strip()], a.note)
+        print(f"recorded key {key.key_id}")
     elif a.cmd == "check":
         ok = store.ledger_ok()
         print(f"ledger {'unbroken' if ok else 'BROKEN'}: {len(store.ledger())} entries, {len(store.serials())} models")

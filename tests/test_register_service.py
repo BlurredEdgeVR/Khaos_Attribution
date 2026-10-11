@@ -234,3 +234,26 @@ def test_sync_sets_a_refused_entry_aside_and_goes_on(register, tmp_path):
     assert box.drop("nothing") is False
     eid = box.append("served", {"serial": R.FIRST_SERIAL, "space_url": "x", "state": "serving", "nonce": "0123456789ac"})
     assert box.drop(eid) is True and not box.pending()
+
+
+def test_the_ceremony_makes_a_key_once_and_records_it_in_the_ledger_never_a_development_one(tmp_path, monkeypatch, capsys):
+    """make-key refuses to overwrite; key records the serving key's id, its public hash and who was present, and
+    refuses while the service runs on a development key."""
+    from register_service.__main__ import main
+    from register_service.store import Store
+    key_path = tmp_path / "ceremony" / "register-key.pem"
+    assert main(["make-key", str(key_path)]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("key id ") and "BEGIN PUBLIC KEY" in out and key_path.is_file() and key_path.with_suffix(".pub").is_file()
+    with pytest.raises(SystemExit, match="made once"):
+        main(["make-key", str(key_path)])
+    monkeypatch.setenv("REGISTER_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("REGISTER_KEY_FILE", str(key_path))
+    monkeypatch.setenv("REGISTER_DEV_KEY", "1")
+    with pytest.raises(SystemExit, match="development key"):
+        main(["key", "--present", "A, B"])
+    monkeypatch.delenv("REGISTER_DEV_KEY")
+    assert main(["key", "--present", "Ava Guardian, Ben Guardian", "--note", "first ceremony"]) == 0
+    entries = Store(tmp_path / "data" / "register.sqlite3").ledger()
+    assert entries[-1]["kind"] == "key" and entries[-1]["detail"]["present"] == ["Ava Guardian", "Ben Guardian"]
+    assert len(entries[-1]["detail"]["public_key_sha256"]) == 64 and entries[-1]["key_id"] == out.split()[2]

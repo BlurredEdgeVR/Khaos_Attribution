@@ -204,6 +204,12 @@ class Store:
     def serials(self) -> list:
         return [r["serial"] for r in self.db.execute("SELECT serial FROM records ORDER BY serial")]
 
+    def record_key(self, key_id: str, public_pem: str, present: list, note: str = "") -> None:
+        """The ceremony's entry: which key countersigns from now on, and who was there when it was made."""
+        with self.db:
+            self._ledger("key", None, None, key_id, {"public_key_sha256": sha256_hex(public_pem.encode("utf-8")),
+                                                     "present": [str(p)[:80] for p in present][:12], "note": note[:400]})
+
     # ---- the ledger ----
 
     def _ledger(self, kind: str, serial, record_sha256, key_id, detail: dict) -> None:
