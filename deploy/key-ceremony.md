@@ -4,7 +4,32 @@ The register countersigns every record with one Ed25519 key. Until the ceremony 
 
 What the code can and cannot do, said plainly: the service signs from a PEM file it reads at start. It cannot sign from a hardware token. So the key is made on a machine that is offline for the whole ceremony and is written to removable media, never to that machine's own disk. The plan's "hardware key" is, for now, a sealed USB stick.
 
-## Before
+## The short ceremony
+
+Two of the Foundation's directors, one new USB stick, one envelope, about fifteen minutes. The key is made on the server, where it lives anyway; the stick is its only other copy. Every step runs on the server as root, except the copy, which runs on a laptop with the stick in it.
+
+1. Make the key. The register keeps signing with the development key meanwhile.
+   ```
+   register-key make
+   ```
+   It prints the key id, the public key and the private file's sha256. Write the id and the hash on a sheet.
+2. Copy the private key straight onto the stick, and check it:
+   ```
+   ssh register 'sudo cat /srv/register/data/staged/register-key.pem' > /Volumes/<STICK>/register-key.pem
+   shasum -a 256 /Volumes/<STICK>/register-key.pem
+   ```
+   The hash must match the sheet. Eject the stick, seal it in the envelope, both sign across the flap and the sheet.
+3. Switch, naming who was there:
+   ```
+   register-key switch "Name, Name"
+   ```
+   It retires the development key, signs with the new one, checks the server now says so, and writes the names and the key id into the public ledger. If any check fails it puts the development key back.
+
+Each step refuses to run twice, and neither runs once the development setting is gone, so the development key can never be promoted by deleting the setting alone. When more Guardians are named later, the same key is kept and their custody is recorded with `register-cli key --present "Name, Name" --note "custody"`.
+
+The fuller ceremony below keeps the key off the server's own tools while it is made. Use it when the Guardians want that.
+
+## The full ceremony: before
 
 - The Guardians named and present. At least two.
 - A laptop that can be started from a live Linux USB with networking off, with Python 3.12 available on it, and the contract's `[registry]` extra installed on that live system beforehand (the ceremony itself is offline).

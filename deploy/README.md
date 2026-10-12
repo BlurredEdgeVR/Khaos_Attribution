@@ -20,4 +20,4 @@ Accounts and invites are made on the server with `register-cli account <name>` a
 
 ## The key
 
-The service countersigns with the Ed25519 key at `REGISTER_KEY_FILE`, a PEM file it reads at start. With `REGISTER_DEV_KEY=1` it makes one if none is there and says on every page that nothing it signs is a Guild record. The ceremony replaces that file with the Guardians' key and removes the line. The code signs from a file, not from a hardware token: a key that must never touch a disk needs a signing step the service does not have yet.
+The service countersigns with the Ed25519 key at `REGISTER_KEY_FILE`, a PEM file it reads at start. With `REGISTER_DEV_KEY=1` it makes one if none is there and says on every page that nothing it signs is a Guild record. The ceremony replaces that file with the Foundation's key and removes the line: the short version is `register-key make`, then `register-key switch "Name, Name"` (see `key-ceremony.md`). The code signs from a file, not from a hardware token: a key that must never touch a disk needs a signing step the service does not have yet.

@@ -143,6 +143,7 @@ WantedBy=timers.target
 UNIT
 
 install -m 755 "$(dirname "$0")/register-mirror.sh" /usr/local/bin/register-mirror
+install -m 755 "$(dirname "$0")/register-key.sh" /usr/local/sbin/register-key
 cat > /etc/systemd/system/register-mirror.service <<UNIT
 [Unit]
 Description=Push the Guild Register's public mirror
