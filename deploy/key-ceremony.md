@@ -6,28 +6,35 @@ What the code can and cannot do, said plainly: the service signs from a PEM file
 
 ## The short ceremony
 
-Two of the Foundation's directors, one new USB stick, one envelope, about fifteen minutes. The key is made on the server, where it lives anyway; the stick is its only other copy. Every step runs on the server as root, except the copy, which runs on a laptop with the stick in it.
+Two of the Foundation's directors, each with a YubiKey 5 (any 5-series key; the FIDO-only Security Key series cannot do this), one USB stick, one envelope, about twenty minutes. The key is made on the server, where it lives anyway. Its only backup is encrypted to both YubiKeys: either one with its PIN opens it, nothing else does. The laptop needs `brew install age age-plugin-yubikey`.
 
-1. Make the key. The register keeps signing with the development key meanwhile.
+1. Each director, with their own YubiKey plugged in, sets it up once and types their own PIN:
+   ```
+   age-plugin-yubikey --generate
+   age-plugin-yubikey --identity > yubikey-<name>.txt
+   ```
+   The first prints a recipient (`age1yubikey1…`). Neither the recipient nor the identity file is secret. Each director writes their PUK on the sheet; nobody else sees a PIN.
+2. Make the key; the register keeps signing with the development key meanwhile:
    ```
    register-key make
    ```
-   It prints the key id, the public key and the private file's sha256. Write the id and the hash on a sheet.
-2. Copy the private key straight onto the stick, and check it:
+   Write the key id and the hash on the sheet.
+3. Lock the backup on the laptop; the key passes through memory, and only the encrypted copy is written:
    ```
-   ssh register 'sudo cat /srv/register/data/staged/register-key.pem' > /Volumes/<STICK>/register-key.pem
-   shasum -a 256 /Volumes/<STICK>/register-key.pem
+   deploy/register-key-backup.sh lock register-key.age <recipient-1> <recipient-2>
+   deploy/register-key-backup.sh check register-key.age yubikey-<name-1>.txt
+   deploy/register-key-backup.sh check register-key.age yubikey-<name-2>.txt
    ```
-   The hash must match the sheet. Eject the stick, seal it in the envelope, both sign across the flap and the sheet.
-3. Switch, naming who was there:
+   Both checks must say the copy matches the server's key. Copy `register-key.age` to the stick and to the Foundation's storage box. Seal the stick and the sheet in the envelope; both sign across the flap.
+4. Switch, naming who was there:
    ```
    register-key switch "Name, Name"
    ```
    It retires the development key, signs with the new one, checks the server now says so, and writes the names and the key id into the public ledger. If any check fails it puts the development key back.
 
-Each step refuses to run twice, and neither runs once the development setting is gone, so the development key can never be promoted by deleting the setting alone. When more Guardians are named later, the same key is kept and their custody is recorded with `register-cli key --present "Name, Name" --note "custody"`.
+To restore the key onto a new server, plug in either YubiKey: `age -d -i yubikey-<name>.txt register-key.age`, piped straight to the server. Each step refuses to run twice, and neither server step runs once the development setting is gone, so the development key can never be promoted by deleting the setting alone. When more Guardians are named later, the same key is kept and their custody is recorded with `register-cli key --present "Name, Name" --note "custody"`.
 
-The fuller ceremony below keeps the key off the server's own tools while it is made. Use it when the Guardians want that.
+The full ceremony below keeps the key off the server's own tools while it is made. Use it when the Guardians want that.
 
 ## The full ceremony: before
 
