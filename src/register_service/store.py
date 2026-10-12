@@ -156,6 +156,10 @@ class Store:
         out["machine_public_pem"] = mach["public_pem"] if mach else None
         return out
 
+    def serial_of_record(self, record_sha256: str) -> int | None:
+        row = self.db.execute("SELECT serial FROM records WHERE record_sha256 = ?", (record_sha256,)).fetchone()
+        return int(row["serial"]) if row else None
+
     def withdraw(self, serial: int, key_id: str, reason: str) -> dict:
         with self._lock, self.db:
             row = self.db.execute("SELECT * FROM records WHERE serial = ?", (serial,)).fetchone()

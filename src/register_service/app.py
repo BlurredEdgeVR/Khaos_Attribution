@@ -14,6 +14,7 @@ import time
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, Response
+from starlette.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 
 from khaos_attribution import registry as R
@@ -96,6 +97,8 @@ class RateLimit:
 
 PUBLIC_LIMITS = {"/api/verify": 20, "/api/enrol": 6}
 SIGNED_LIMIT = 120
+# A Publish checks and claims every training track at once; a large catalogue must fit in a minute.
+CLAIM_LIMITS = {"/api/claims": 600, "/api/claims/check": 600}
 
 
 def create_app(cfg: dict | None = None) -> FastAPI:
@@ -162,7 +165,7 @@ def create_app(cfg: dict | None = None) -> FastAPI:
         except Exception as exc:  # noqa: BLE001
             log.error("mirror not written for %s: %s", serial, exc)
 
-    limits = {path: RateLimit(n) for path, n in PUBLIC_LIMITS.items()}
+    limits = {path: RateLimit(n) for path, n in {**PUBLIC_LIMITS, **CLAIM_LIMITS}.items()}
     signed_limit = RateLimit(SIGNED_LIMIT)
 
     @app.middleware("http")
@@ -234,6 +237,7 @@ def create_app(cfg: dict | None = None) -> FastAPI:
                 raise HTTPException(404, str(e)) from None
             except PermissionError as e:
                 raise HTTPException(403, str(e)) from None
+            index.release_claims(out["serial"])
             mirror_quietly(out["serial"])
             return out
         return once(body, key_id, work)
@@ -282,6 +286,72 @@ def create_app(cfg: dict | None = None) -> FastAPI:
                 raise HTTPException(422, str(e)) from None
             return {k: out[k] for k in ("generation_id", "serial", "payload", "released_at", "landmarks", "already")}
         return once(body, key_id, work)
+
+    def workshop_only(machine: dict) -> None:
+        if machine["role"] != "workshop":
+            raise HTTPException(403, "only a Workshop claims or checks training tracks")
+
+    def phases_of(body: dict) -> list:
+        phases = body.get("phases")
+        if not isinstance(phases, list) or not phases or not all(isinstance(p, list) for p in phases):
+            raise HTTPException(422, "phases is a list of fingerprint lists")
+        try:
+            return [[(int(h), int(o)) for h, o in p] for p in phases]
+        except (TypeError, ValueError):
+            raise HTTPException(422, "a landmark is [hash, offset_ms]") from None
+
+    @app.post("/api/claims")
+    async def claims(request: Request):
+        """A registered model's training track, claimed for the model's account by the record it was registered under."""
+        body, machine, key_id, _ = await signed_body(request)
+        workshop_only(machine)
+
+        def work():
+            serial = store.serial_of_record(str(body.get("record_sha256") or ""))
+            rec = store.record(serial) if serial is not None else None
+            if not rec:
+                raise HTTPException(404, "no model is registered under that record")
+            if rec["account_id"] != machine["account_id"]:
+                raise HTTPException(403, "a Workshop claims tracks for its own account's models only")
+            if rec["state"] == "withdrawn":
+                raise HTTPException(410, "the model is withdrawn")
+            track_id = str(body.get("track_id") or "").strip()
+            declaration = str(body.get("declaration") or "").strip()
+            trained = {str(t.get("track_id")) for t in (rec["signed"]["record"].get("training_set") or {}).get("tracks") or []}
+            if track_id not in trained:
+                raise HTTPException(422, "a claim names one of the training tracks the model's own record lists")
+            if not declaration or len(declaration) > 64:
+                raise HTTPException(422, "declaration names the declaration the artist made")
+            phases = body.get("phases")
+            if phases is not None and not (isinstance(phases, list) and all(isinstance(p, list) for p in phases) and len(phases) <= 8):
+                raise HTTPException(422, "phases is a short list of fingerprint lists")
+            try:
+                out = index.claim(rec["account_id"], rec["serial"], track_id, body.get("fingerprint"), declaration, key_id, phases)
+            except ValueError as e:
+                raise HTTPException(422, str(e)) from None
+            if not out["claimed"]:
+                # Refused for what it is, so a Workshop's outbox sets it aside instead of stopping on it.
+                raise HTTPException(403, f"this recording is already a training track of another account's registered model "
+                                         f"(claim {out['conflict']['claim_ref']}); a dispute goes to the Foundation")
+            return {"serial": rec["serial"], "track_id": track_id, **out}
+        # The fingerprint matching is heavy: off the event loop, so verify and enrol stay answered meanwhile.
+        return await run_in_threadpool(once, body, key_id, work)
+
+    @app.post("/api/claims/check")
+    async def claims_check(request: Request):
+        """Whether a recording is already claimed (by nobody, this machine's account, or another account) and
+        whether it is a released output: the Workshop's one question at import."""
+        body, machine, _, _ = await signed_body(request)
+        workshop_only(machine)
+        return await run_in_threadpool(index.check_claim, phases_of(body), machine["account_id"])
+
+    @app.get("/api/models/{serial}/claims")
+    def model_claims(serial: int):
+        rec = store.record(serial)
+        if not rec:
+            raise HTTPException(404, "no such model")
+        tracks = len((rec["signed"]["record"].get("training_set") or {}).get("tracks") or [])
+        return {"serial": serial, "tracks": tracks, **index.claims_of(serial)}
 
     @app.post("/api/verify")
     async def verify(request: Request):

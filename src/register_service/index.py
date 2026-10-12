@@ -1,5 +1,6 @@
-"""The fingerprint index beside the register: released outputs under their model's watermark bucket, and the
-verify that names one of them. Fingerprints are landmark hashes, never audio.
+"""The fingerprint index beside the register: released outputs under their model's watermark bucket, the
+verify that names one of them, and the training tracks each registered model claims. Fingerprints are
+landmark hashes, never audio.
 """
 
 from __future__ import annotations
@@ -19,6 +20,14 @@ CREATE TABLE IF NOT EXISTS fingerprints (hash INTEGER NOT NULL, generation_id TE
 CREATE INDEX IF NOT EXISTS fingerprints_hash ON fingerprints (hash);
 CREATE INDEX IF NOT EXISTS fingerprints_gen ON fingerprints (generation_id);
 CREATE INDEX IF NOT EXISTS outputs_payload ON outputs (payload);
+CREATE TABLE IF NOT EXISTS claims (claim_id INTEGER PRIMARY KEY, account_id INTEGER NOT NULL, serial INTEGER NOT NULL,
+  track_id TEXT NOT NULL, declaration TEXT NOT NULL, claimed_at TEXT NOT NULL, claimed_by TEXT NOT NULL,
+  landmarks INTEGER NOT NULL, UNIQUE (serial, track_id));
+CREATE TABLE IF NOT EXISTS claim_fingerprints (hash INTEGER NOT NULL, claim_id INTEGER NOT NULL, offset_ms INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS claim_fingerprints_hash ON claim_fingerprints (hash);
+CREATE INDEX IF NOT EXISTS claim_fingerprints_claim ON claim_fingerprints (claim_id);
+CREATE TABLE IF NOT EXISTS claim_conflicts (at TEXT NOT NULL, account_id INTEGER NOT NULL, serial INTEGER NOT NULL,
+  track_id TEXT NOT NULL, held_by_claim INTEGER NOT NULL, votes INTEGER NOT NULL);
 """
 MAX_LANDMARKS = 200_000
 CANDIDATES = 50
@@ -37,13 +46,7 @@ class Index:
     def release(self, generation_id: str, serial: int, payload: int, artist_id: str, fingerprint: list,
                 released_by: str, kind: str) -> dict:
         """One released output under its model's bucket; the same id again is the first release, unchanged."""
-        if not isinstance(fingerprint, list) or not fingerprint or len(fingerprint) > MAX_LANDMARKS:
-            raise ValueError(f"a fingerprint is 1 to {MAX_LANDMARKS} landmarks")
-        rows = []
-        for item in fingerprint:
-            if not (isinstance(item, (list, tuple)) and len(item) == 2 and all(isinstance(v, int) and not isinstance(v, bool) for v in item)):
-                raise ValueError("a landmark is [hash, offset_ms], both integers")
-            rows.append((int(item[0]), generation_id, int(item[1])))
+        rows = [(h, generation_id, o) for h, o in _landmarks(fingerprint)]
         with self._lock:
             have = self.db.execute("SELECT * FROM outputs WHERE generation_id = ?", (generation_id,)).fetchone()
             if have:
@@ -109,3 +112,96 @@ class Index:
         if payload is not None:
             return {"grade": "bucket", "payload": payload, "searched": "bucket"}
         return {"grade": "none", "searched": "all"}
+
+    def _claim_matches(self, phases: list) -> list:
+        """Every claim the query confidently matches, strongest first: (votes, claim row). Confidence is read against
+        the shorter of the two, so a short claimed track inside a long medley matches either way round."""
+        hashes = sorted({h for q in phases for h, _ in q})
+        counts: dict = {}
+        for i in range(0, len(hashes), 900):
+            chunk = hashes[i:i + 900]
+            q = "SELECT claim_id AS c, COUNT(*) AS n FROM claim_fingerprints WHERE hash IN (%s) GROUP BY claim_id" % ",".join("?" * len(chunk))
+            for row in self.db.execute(q, chunk):
+                counts[row["c"]] = counts.get(row["c"], 0) + row["n"]
+        query_len = len(phases[0]) if phases else 0
+        out = []
+        for c in sorted(counts, key=counts.get, reverse=True)[:CANDIDATES]:
+            fps = [(r["hash"], r["offset_ms"]) for r in self.db.execute("SELECT hash, offset_ms FROM claim_fingerprints WHERE claim_id = ?", (c,))]
+            votes, distinct = best_phase_stats(phases, fps)
+            if is_confident(votes, min(query_len, len(fps)), distinct):
+                out.append((votes, dict(self.db.execute("SELECT * FROM claims WHERE claim_id = ?", (c,)).fetchone())))
+        out.sort(key=lambda m: m[0], reverse=True)
+        return out
+
+    def check_claim(self, phases: list, account_id: int) -> dict:
+        """Whether a recording is already a registered model's training track (none, this account's, or another's),
+        and the serial of the released output it is, when it is one."""
+        matches = self._claim_matches(phases)
+        output = self.verify(phases, None)
+        released = int(output["output"]["serial"]) if output["grade"] == "output" else None
+        others = [(v, c) for v, c in matches if c["account_id"] != account_id]
+        if others:
+            return {"grade": "other", "claim_ref": others[0][1]["claim_id"], "votes": others[0][0], "released_output": released}
+        if matches:
+            return {"grade": "mine", "serial": matches[0][1]["serial"], "track_id": matches[0][1]["track_id"], "released_output": released}
+        return {"grade": "none", "released_output": released}
+
+    def claim(self, account_id: int, serial: int, track_id: str, fingerprint: list, declaration: str, claimed_by: str,
+              phases: list | None = None) -> dict:
+        """A registered model's training track, claimed for its account; refused when another account holds it first.
+        `phases`, the four-phase query of the same audio, is what the conflict test reads when given."""
+        rows = _landmarks(fingerprint)
+        query = [_landmarks(p) for p in phases] if phases else [rows]
+        with self._lock:
+            have = self.db.execute("SELECT * FROM claims WHERE serial = ? AND track_id = ?", (serial, track_id)).fetchone()
+            if have:
+                return {"claimed": True, "claim_ref": have["claim_id"], "already": True}
+            others = [(v, c) for v, c in self._claim_matches(query) if c["account_id"] != account_id]
+            if others:
+                votes, held = others[0]
+                self.db.execute("INSERT INTO claim_conflicts (at, account_id, serial, track_id, held_by_claim, votes) VALUES (?, ?, ?, ?, ?, ?)",
+                                (now_utc(), account_id, serial, track_id, held["claim_id"], votes))
+                return {"claimed": False, "conflict": {"claim_ref": held["claim_id"], "votes": votes}}
+            self.db.execute("BEGIN IMMEDIATE")
+            try:
+                cur = self.db.execute("INSERT INTO claims (account_id, serial, track_id, declaration, claimed_at, claimed_by, landmarks)"
+                                      " VALUES (?, ?, ?, ?, ?, ?, ?)", (account_id, serial, track_id, declaration, now_utc(), claimed_by, len(rows)))
+                cid = cur.lastrowid
+                self.db.executemany("INSERT INTO claim_fingerprints (hash, claim_id, offset_ms) VALUES (?, ?, ?)",
+                                    [(h, cid, o) for h, o in rows])
+                self.db.execute("COMMIT")
+            except BaseException:
+                self.db.execute("ROLLBACK")
+                raise
+        return {"claimed": True, "claim_ref": cid, "already": False}
+
+    def release_claims(self, serial: int) -> int:
+        """A withdrawn model's claims end with it: the recordings are free for the account that owns them."""
+        with self._lock:
+            ids = [r["claim_id"] for r in self.db.execute("SELECT claim_id FROM claims WHERE serial = ?", (serial,))]
+            self.db.execute("BEGIN IMMEDIATE")
+            try:
+                self.db.executemany("DELETE FROM claim_fingerprints WHERE claim_id = ?", [(i,) for i in ids])
+                self.db.execute("DELETE FROM claims WHERE serial = ?", (serial,))
+                self.db.execute("COMMIT")
+            except BaseException:
+                self.db.execute("ROLLBACK")
+                raise
+        return len(ids)
+
+    def claims_of(self, serial: int) -> dict:
+        """What a model's page says: how many of its training tracks are claimed, and how many were refused."""
+        claimed = int(self.db.execute("SELECT COUNT(*) FROM claims WHERE serial = ?", (serial,)).fetchone()[0])
+        refused = int(self.db.execute("SELECT COUNT(DISTINCT track_id) FROM claim_conflicts WHERE serial = ?", (serial,)).fetchone()[0])
+        return {"claimed": claimed, "refused": refused}
+
+
+def _landmarks(fingerprint) -> list:
+    if not isinstance(fingerprint, list) or not fingerprint or len(fingerprint) > MAX_LANDMARKS:
+        raise ValueError(f"a fingerprint is 1 to {MAX_LANDMARKS} landmarks")
+    rows = []
+    for item in fingerprint:
+        if not (isinstance(item, (list, tuple)) and len(item) == 2 and all(isinstance(v, int) and not isinstance(v, bool) for v in item)):
+            raise ValueError("a landmark is [hash, offset_ms], both integers")
+        rows.append((int(item[0]), int(item[1])))
+    return rows

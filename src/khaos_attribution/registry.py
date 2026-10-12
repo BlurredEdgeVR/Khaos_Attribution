@@ -341,7 +341,7 @@ class RegisterError(RuntimeError):
 
 
 class RegisterClient:
-    """The five calls a machine makes; every one carries the machine's signature over its body."""
+    """The calls a machine makes; every one carries the machine's signature over its body."""
 
     def __init__(self, base_url: str, key: SigningKey, timeout: float = 20.0):
         self.base_url = base_url.rstrip("/")
@@ -396,6 +396,20 @@ class RegisterClient:
         return self._post("/api/outputs", {"generation_id": generation_id, "serial": serial, "fingerprint": fingerprint,
                                            "nonce": nonce or secrets.token_hex(8)})
 
+    def claim(self, record_sha256: str, track_id: str, fingerprint: list, declaration: str, nonce: str | None = None,
+              phases: list | None = None) -> dict:
+        """A registered model's training track, claimed for the model's account; refused when another account holds it."""
+        body = {"record_sha256": record_sha256, "track_id": track_id, "fingerprint": fingerprint,
+                "declaration": declaration, "nonce": nonce or secrets.token_hex(8)}
+        if phases is not None:
+            body["phases"] = phases
+        return self._post("/api/claims", body)
+
+    def check_claim(self, phases: list) -> dict:
+        """Whether a recording is already a registered model's training track (grade none, mine or other) and the
+        serial of the released output it is, if any."""
+        return self._post("/api/claims/check", {"phases": phases, "nonce": secrets.token_hex(8)})
+
     def verify(self, phases: list, watermark_id: int | None = None) -> dict:
         """Anyone's question: the four-phase fingerprint and the codeword when it read. No key."""
         return self._post_public("/api/verify", {"phases": phases, "watermark_id": watermark_id})
@@ -423,12 +437,14 @@ class RegisterClient:
             kind, body = entry["kind"], entry["body"]
             try:
                 answer = {"publish": self.publish, "withdraw": lambda b: self.withdraw(**b),
-                          "served": lambda b: self.served(**b), "release": lambda b: self.release(**b)}[kind](body)
+                          "served": lambda b: self.served(**b), "release": lambda b: self.release(**b),
+                          "claim": lambda b: self.claim(**b)}[kind](body)
             except RegisterError as e:
-                # Not enrolled, a replay of another body, or the register itself failing: stop and keep order.
+                # Not enrolled, a replay of another body, too many calls this minute, or the register itself failing:
+                # stop and keep order.
                 # A refusal of this entry for what it is (wrong account, no such serial, a record it will not take)
                 # is set aside so the entries behind it are not held for ever.
-                if e.status in (401, 409) or e.status >= 500:
+                if e.status in (401, 409, 429) or e.status >= 500:
                     raise
                 outbox.refuse(path, {"status": e.status, "message": str(e)})
                 continue

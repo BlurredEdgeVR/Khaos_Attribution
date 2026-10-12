@@ -249,6 +249,20 @@ def test_sync_sets_a_refused_entry_aside_and_goes_on(register, tmp_path):
     assert box.drop(eid) is True and not box.pending()
 
 
+def test_sync_waits_on_too_many_calls_and_never_sets_the_entry_aside(register, tmp_path):
+    """A 429 is the register asking for time: the entry stays pending for the next sync, never refused."""
+    key, client = _machine(register, "artist-one")
+    box = R.Outbox(tmp_path)
+    box.append("publish", _signed(key))
+
+    def busy(path, body):
+        raise R.RegisterError(429, "too many requests from this address; try again in a minute")
+    client._post = busy
+    with pytest.raises(R.RegisterError):
+        client.sync(box)
+    assert len(box.pending()) == 1 and not box.refused()
+
+
 def test_the_ceremony_makes_a_key_once_and_records_it_in_the_ledger_never_a_development_one(tmp_path, monkeypatch, capsys):
     """make-key refuses to overwrite; key records the serving key's id, its public hash and who was present, and
     refuses while the service runs on a development key."""
