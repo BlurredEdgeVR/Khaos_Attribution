@@ -29,25 +29,19 @@ index rebuilt from them.
   variations, repaints, extends. Exported stems re-embed their source
   output's codeword. A retrain is a new model and a new ID.
 
-### Measured survival (real outputs, 2026-08-20)
+### What survives, and the rule that follows
 
-| transform | presence | ID decodes |
-|---|---|---|
-| MP3 128/320k, AAC 128k, Opus 96k, Vorbis q4 (Wwise's music codec), 44.1k resample | ✓ (~1.0) | ✓ |
-| loudness normalisation | ✓ | usually |
-| 10 s mid-file excerpt | ✓ (~1.0) | ✗ (3–4 bits flip) |
-| adversarial removal | — | — (out of scope: this is provenance, not DRM) |
-
-Excerpts break the *message* but never the *presence* — and the
-miscorrection is **deterministic** (an excerpt's windows agree on the
-same wrong codeword; measured live 2026-08-20), so no decode-side gate
-can catch it. /verify therefore resolves **content first**: a
-fingerprint match names the exact output and its run, and the decoded
-payload is reported as corroboration — confirmed, "didn't survive this
-copy", or absent. A raw ID resolves alone only when no content evidence
-exists (worded "uncorroborated"). Never embed a second watermark over a
-marked file — two messages superimpose into garbage (measured); stems
-re-embedding the *same* codeword is fine.
+Codecs and resampling keep both the presence and the ID. A short
+excerpt keeps the presence but can decode the wrong ID, and it does so
+consistently, so no decode-side gate can catch it. /verify therefore
+resolves **content first**: a fingerprint match names the exact output
+and its run, and the decoded payload is reported as corroboration —
+confirmed, "didn't survive this copy", or absent. A raw ID resolves
+alone only when no content evidence exists (worded "uncorroborated").
+Never embed a second watermark over a marked file; two messages
+superimpose into garbage. Stems re-embedding the *same* codeword is
+fine. Removal by an adversary is out of scope: this is provenance, not
+DRM.
 
 ## How IDs are allocated
 
@@ -163,7 +157,7 @@ missing/unreadable, fingerprint lag, or the healthy census.
 | thing | where |
 |---|---|
 | contract (codec, allocation, fingerprints, schemas) | `Khaos_Attribution/src/khaos_attribution/{watermark,fingerprint,validation}.py` |
-| design decisions + phase-0 evidence | `Khaos_Attribution/docs/watermarking-v2.md` |
+| design decisions | `Khaos_Attribution/docs/watermarking-v2.md` |
 | index DDL + rebuild rules | `Khaos_Attribution/docs/provenance-index.md` |
 | allocation + backfill | Workshop `src/training/training.py`, `scripts/backfill_model_watermarks.py` |
 | embedding at generation | Platform `server.py` runner; Workshop `scripts/infer.py` |

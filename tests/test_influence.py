@@ -89,6 +89,11 @@ def test_attribute_scores_every_valid_row_and_zeroes_dead_ones(tmp_path):
         I.attribute(idx, np.array([np.nan] * 16))
 
 
+# Stand-in figures: the measured ones are the rooms' to supply, never the contract's.
+KERNEL_VALIDATION = {"test": "a stand-in record", "money_on_the_right_tracks": 0.5}
+KERNEL_ERROR_PP = 5.0
+
+
 def _doc(tmp_path, **over):
     d, *_ = _index_dir(tmp_path)
     idx = I.load_index(d)
@@ -96,7 +101,8 @@ def _doc(tmp_path, **over):
               "tb": {"title": "B", "writers": [{"name": "W2", "share_pct": 100}], "publishers": [], "masters": []}}
     kw = dict(generation_id="g", artist_id="art", adapter_version="run_1",
               track_totals={"ta": 3.0, "tb": 1.0, "tc": -0.5}, rights=rights,
-              fallback_titles={"tc": "C"}, index=idx, index_sha256="x" * 64, adapter_sha256="y" * 64, lam=0.5)
+              fallback_titles={"tc": "C"}, index=idx, index_sha256="x" * 64, adapter_sha256="y" * 64, lam=0.5,
+              validation=KERNEL_VALIDATION, measured_error_pp=KERNEL_ERROR_PP)
     kw.update(over)
     return I.build_influence_estimate(**kw)
 
@@ -108,10 +114,10 @@ def test_document_validates_with_influence_as_the_share_the_money_follows(tmp_pa
     by = {t["track_id"]: t for t in doc["influence"]}
     assert by["ta"]["influence_share_pct"] == by["ta"]["blended_share_pct"] == 75.0
     assert by["tc"]["blended_share_pct"] == 0.0 and by["tc"]["title"] == "C"
-    assert by["ta"]["share_range_pct"] == [71.7, 78.3] and by["tc"]["share_range_pct"][0] == 0.0
-    assert doc["splits"]["writers"][0] == {"name": "W1", "share_pct": 75.0, "share_range_pct": [71.7, 78.3]}
+    assert by["ta"]["share_range_pct"] == [70.0, 80.0] and by["tc"]["share_range_pct"][0] == 0.0
+    assert doc["splits"]["writers"][0] == {"name": "W1", "share_pct": 75.0, "share_range_pct": [70.0, 80.0]}
     assert doc["splits"]["unattributed_pct"] == 0.0
-    assert doc["method"]["validation"]["money_on_the_right_tracks"] == 0.802
+    assert doc["method"]["validation"] == KERNEL_VALIDATION
     assert doc["method"]["similarity_informative"] is False and "resemblance" not in doc
     assert any("no rights record" in c for c in doc["caveats"])
 
@@ -151,7 +157,6 @@ def test_the_base_caveat_says_what_the_number_is_and_nothing_else():
     travel in method.validation, where a surface can choose to show them."""
     assert I.BASE_CAVEAT.startswith("Measured influence: how much of this output's adapter gradient")
     assert I.BASE_CAVEAT.endswith("gradient index.") and I.BASE_CAVEAT.count(".") == 1
-    assert I.VALIDATION["money_on_the_right_tracks"] == 0.802
 
 
 def _own(n=80, seed=0):
@@ -168,7 +173,7 @@ def test_the_two_numbers_are_percentiles_of_the_adapters_own_outputs():
     assert t["gain_min"] == round(float(np.percentile(gains, 2.5)), 4)
     assert t["loss_max"] == round(float(np.percentile([r["with"] for r in own], 97.5)), 4)
     assert (t["n_outputs"], t["device"], t["compute_dtype"], t["harness_id"]) == (80, "mps", "bf16", "h")
-    assert 72 <= t["own_accepted"] <= 78 and t["validation"]["record_content_hash"] == "a47e34ce8f7aebe2"
+    assert 72 <= t["own_accepted"] <= 78 and t["validation"] is None
     with pytest.raises(I.InfluenceRefused, match="needs 40 measured outputs"):
         I.abstention_thresholds(own[:39], device="mps", compute_dtype="bf16")
     holed = own[:39] + [{"with": float("nan"), "without": 1.0}, {"with": 0.8, "without": None}]
@@ -277,8 +282,8 @@ def test_an_adapters_own_control_says_how_many_base_outputs_its_numbers_refuse()
 def _calibration(**over):
     block = {"schema": I.CALIBRATION_SCHEMA, "artist_id": "art", "factors": {"ta": 0.5, "tb": 2.0}, "fit_outputs": 80,
              "fitted_on": {"record": "payment_test_v2.calibrated.x.json", "content_hash": "abc"},
-             "validation": {"test": "T2 v2 calibrated", "money_on_the_right_tracks": 0.879, "kernel_alone": 0.811},
-             "measured_error_pp": 2.6}
+             "validation": {"test": "a stand-in calibrated record", "money_on_the_right_tracks": 0.6, "kernel_alone": 0.5},
+             "measured_error_pp": 4.0}
     block.update(over)
     return block
 
@@ -322,13 +327,13 @@ def test_a_calibrated_document_splits_by_the_factors_and_cites_its_own_record(tm
     assert by["tb"]["blended_share_pct"] == pytest.approx(57.14, abs=0.01)
     assert doc["splits"]["writers"][0]["name"] == "W2"
     m = doc["method"]
-    assert m["kind"] == "dtrak" and m["calibrated"] is True and m["measured_error_pp"] == 2.6
-    assert m["validation"]["money_on_the_right_tracks"] == 0.879
+    assert m["kind"] == "dtrak" and m["calibrated"] is True and m["measured_error_pp"] == 4.0
+    assert m["validation"]["money_on_the_right_tracks"] == 0.6
     assert m["calibration"]["factors"] == {"ta": 0.5, "tb": 2.0}
     assert m["calibration"]["fitted_on"]["content_hash"] == "abc" and m["calibration"]["fit_outputs"] == 80
     assert m["calibration"]["kernel_shares"]["ta"] == 0.75
     assert I.CALIBRATED_CAVEAT in doc["caveats"]
-    assert by["ta"]["share_range_pct"] == [pytest.approx(40.26, abs=0.01), pytest.approx(45.46, abs=0.01)]
+    assert by["ta"]["share_range_pct"] == [pytest.approx(38.86, abs=0.01), pytest.approx(46.86, abs=0.01)]
 
 
 def test_an_unreadable_calibration_leaves_the_kernel_alone_and_says_why(tmp_path):
@@ -336,8 +341,8 @@ def test_an_unreadable_calibration_leaves_the_kernel_alone_and_says_why(tmp_path
     doc = _doc(tmp_path, calibration=_calibration(fit_outputs=12))
     by = {t["track_id"]: t for t in doc["influence"]}
     assert by["ta"]["blended_share_pct"] == 75.0
-    assert doc["method"]["calibrated"] is False and doc["method"]["measured_error_pp"] == I.MEASURED_ERROR_PP
-    assert doc["method"]["validation"]["money_on_the_right_tracks"] == 0.802
+    assert doc["method"]["calibrated"] is False and doc["method"]["measured_error_pp"] == KERNEL_ERROR_PP
+    assert doc["method"]["validation"] == KERNEL_VALIDATION
     assert {k: v for k, v in doc["method"]["calibration"].items() if k != "block_sha256"} == \
         {"applied": False, "reason": "calibration fitted on 12 outputs, under 60"}
     assert any(c.startswith("Calibration not applied: ") for c in doc["caveats"])
@@ -365,7 +370,7 @@ def test_a_calibration_needs_its_own_validation_a_sane_error_and_the_right_artis
     assert "None's" in I.read_calibration(_calibration(artist_id=None), index_tracks=["ta"], artist_id="art")["reason"]
     assert I.read_calibration(_calibration(measured_error_pp=None), index_tracks=["ta"])["applied"]
     doc = _doc(tmp_path, calibration=_calibration(measured_error_pp=None))
-    assert doc["method"]["calibrated"] and doc["method"]["measured_error_pp"] == I.MEASURED_ERROR_PP
+    assert doc["method"]["calibrated"] and doc["method"]["measured_error_pp"] == KERNEL_ERROR_PP
     other = _doc(tmp_path, calibration=_calibration(artist_id="other"))
     assert other["method"]["calibrated"] is False and "is other's" in other["method"]["calibration"]["reason"]
 
@@ -414,3 +419,13 @@ def test_a_document_names_the_calibration_block_it_was_read_with_applied_or_not(
     assert _doc(tmp_path, calibration=block)["method"]["calibration"]["block_sha256"] == sha
     refused = _doc(tmp_path, calibration=_calibration(fit_outputs=3))
     assert refused["method"]["calibration"]["applied"] is False and refused["method"]["calibration"]["block_sha256"] == I.calibration_sha256(_calibration(fit_outputs=3))
+
+
+def test_the_contract_holds_no_measured_figure_and_refuses_a_share_without_its_error(tmp_path):
+    """The measured validation and error are supplied by the caller; with no error and no calibration, no share."""
+    assert not hasattr(I, "VALIDATION") and not hasattr(I, "MEASURED_ERROR_PP") and not hasattr(I, "ABSTENTION_VALIDATION")
+    with pytest.raises(I.InfluenceRefused, match="no measured error"):
+        _doc(tmp_path, measured_error_pp=None)
+    t = I.abstention_thresholds(_own(), device="cpu", compute_dtype="fp32", validation={"test": "stand-in"})
+    assert t["validation"] == {"test": "stand-in"}
+    assert I.abstention_thresholds(_own(), device="cpu", compute_dtype="fp32")["validation"] is None

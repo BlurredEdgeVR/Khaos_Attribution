@@ -1,6 +1,6 @@
 """Does the fingerprint still name an output after distribution, and refuse audio it never saw?
-The bar is docs/fingerprint-bar.md, written before this ran; the record lands beside it.
-    <workshop-venv-python> scripts/fingerprint_survival.py --outputs <dir>... --decoys <dir>... --machine laptop
+The bar was written before this ran; the record lands in --record-dir, which stays private.
+    <workshop-venv-python> scripts/fingerprint_survival.py --outputs <dir>... --decoys <dir>... --machine laptop --record-dir <dir>
 """
 
 import argparse
@@ -165,7 +165,7 @@ def report(rows: list, machine: str, record_dir: Path) -> int:
     per_ok = all(h / n >= BAR_PER_TRANSFORM for t, (h, n) in per.items() if t not in NOT_COUNTED and n)
     passed = overall[1] > 0 and overall[0] / overall[1] >= BAR_OVERALL and per_ok and not false_hits
     record = {
-        "bar": "docs/fingerprint-bar.md", "machine": machine, "host": platform.node(),
+        "bar": "fingerprint-bar.md", "machine": machine, "host": platform.node(),
         "run_at_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "outputs": len({r["file"] for r in out_rows}), "decoys": len({r["file"] for r in rows if r["kind"] == "decoy"}),
         "identification": {"hits": overall[0], "pairs": overall[1], "rate": round(overall[0] / overall[1], 4) if overall[1] else None},
@@ -188,7 +188,7 @@ def main(argv=None) -> int:
     p.add_argument("--outputs", nargs="+", required=True, help="folders of rendered outputs (searched for *.wav)")
     p.add_argument("--decoys", nargs="+", required=True, help="folders of audio no output is (the catalogue's originals)")
     p.add_argument("--machine", required=True)
-    p.add_argument("--record-dir", type=Path, default=Path(__file__).resolve().parent.parent / "docs")
+    p.add_argument("--record-dir", type=Path, required=True)
     a = p.parse_args(argv)
     outs, decs = wavs(a.outputs), wavs(a.decoys)
     if not outs or not decs:

@@ -12,23 +12,11 @@ Supersedes the per-output allocation scheme described in
 machinery there are retained. Implementation lands as one contract bump
 (**0.10.0 → 0.11.0**) with the usual uv.lock checklist across consumers.
 
-## 0. Phase-0 measurements and the two amendments they forced
+## 0. The two amendments distribution forced
 
-Measured on real generated outputs (scripts/watermark_survival.py,
-2026-08-20, laptop):
-
-- **Codecs are safe**: MP3 128/320k, AAC 128k, Opus 96k, Vorbis q4
-  (Wwise's music codec), 44.1k resample — detection prob ≥ 0.997 and the
-  ID decodes correctly (SECDED correcting ≤1 bit as designed).
-- **Mid-file excerpts break the MESSAGE, not the presence**: a 10 s
-  excerpt from anywhere past the start decodes with 3–4 flipped bits at
-  detection prob ≈ 1.0. No affordable code fixes 3–4 errors in 16 bits
-  (t=2 would not help — the 2048/1-bit decision stands, now for a better
-  reason), and windowed majority voting does not rescue it (windows
-  disagree with each other). This weakness exists in the CURRENT
-  per-output scheme too; phase 0 merely measured it.
-- **Double-embedding corrupts**: embedding a second AudioSeal message
-  over an already-marked file yields garbage decodes for BOTH messages.
+Codecs keep the ID; a mid-file excerpt keeps the presence but can decode
+a wrong ID consistently, and a second message embedded over a marked
+file garbles both. The measurements are kept privately.
 
 Amendments:
 

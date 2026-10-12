@@ -3,8 +3,8 @@ per-track shares, and the estimate document both rooms write from them.
 
 The index is built once per adapter where the training pairs are; scoring
 needs only the index and the output's projected gradient. Influence here is
-what a retraining ground truth measured it to be (``VALIDATION``), on the
-catalogue it was measured on; resemblance (CLAP) is a different quantity
+what a retraining ground truth measured it to be, on the catalogue it was
+measured on; the measurement itself is the caller's to supply; resemblance (CLAP) is a different quantity
 and travels beside it under its own name.
 """
 
@@ -28,27 +28,12 @@ FEATURE_TARGET = "vnorm"
 LAMBDA_MULTIPLE = 10.0
 PROJECTION_DIM = 8192
 TIMESTEPS_PER_PAIR = 10
-# The per-track error the validation measured; every share's range is ± this.
-MEASURED_ERROR_PP = 3.3
 INDEX_MATRIX = "gradients.npy"
 INDEX_RECORD = "index.json"
 INDEX_SCHEMA = "khaos.gradient_index/0.1.0"
 NORM_EPS = 1e-12
 UNASSIGNED = "unassigned"
 
-VALIDATION = {
-    "test": "T2 v2: per-output shares against a half-subset retraining regression, pre-registered",
-    "catalogue": "chris_green_dataset_theleap",
-    "money_on_the_right_tracks": 0.802,
-    "interval": [0.797, 0.807],
-    "training_share_rule": 0.695,
-    "slope": 1.00,
-    "record_content_hash": "6caa44b1bf9a79e1",
-    "record_commit": "9b28e8e",
-    "standing": "confirmatory",
-    "scope": "one catalogue of twelve tracks, one composer; a 20-epoch calibration adapter's final "
-             "weights, not yet a served recipe",
-}
 
 BASE_CAVEAT = (
     "Measured influence: how much of this output's adapter gradient each training track "
@@ -73,18 +58,6 @@ ABSTENTION_CONTROL_BAR = 0.9
 # The numbers are read only for outputs within this band of the length they were taken at. Measured on one
 # adapter at one, two and three times that length, where they held; shorter and longer are unmeasured.
 ABSTENTION_LENGTH_BAND = (0.5, 3.0)
-ABSTENTION_VALIDATION = {
-    "test": "T7 by loss: the adapter's own outputs accepted, the base model's and another adapter's refused, pre-registered",
-    "catalogue": "chris_green_dataset_theleap",
-    "own_accepted": [116, 120],
-    "base_refused": [119, 120],
-    "other_adapter_refused": [115, 120],
-    "record_content_hash": "a47e34ce8f7aebe2",
-    "record_commit": "1a2e39e",
-    "standing": "confirmatory",
-    "scope": "one adapter on one device, 30-second outputs scored under the caption they were rendered with; "
-             "re-encoded or trimmed files and adapters trained on overlapping material are untested",
-}
 NOT_ATTRIBUTABLE = ("Not attributable: this adapter does not explain this output clearly better than the base "
                     "model does, so no share is given to any track.")
 
@@ -248,7 +221,8 @@ def _finite_pair(row: Mapping) -> tuple[float, float] | None:
 
 
 def abstention_thresholds(losses: Sequence[Mapping], *, device: str, compute_dtype: str,
-                          control: Sequence[Mapping] | None = None, **measured_on) -> dict:
+                          control: Sequence[Mapping] | None = None, validation: Mapping | None = None,
+                          **measured_on) -> dict:
     """The rule's two numbers from an adapter's own outputs, each ``{"with", "without"}``: the low
     percentile of the gain and the high percentile of the loss with the adapter, to four places.
     ``control`` is the base model's outputs measured the same way: how many the numbers refuse."""
@@ -270,7 +244,7 @@ def abstention_thresholds(losses: Sequence[Mapping], *, device: str, compute_dty
             "gain_percentile": ABSTENTION_GAIN_PERCENTILE, "loss_percentile": ABSTENTION_LOSS_PERCENTILE,
             "device": str(device), "compute_dtype": str(compute_dtype),
             "control": control_reading(control, gain_min, loss_max),
-            "validation": dict(ABSTENTION_VALIDATION)}
+            "validation": dict(validation) if validation else None}
 
 
 def control_reading(control: Sequence[Mapping] | None, gain_min: float, loss_max: float) -> dict | None:
@@ -484,10 +458,12 @@ def build_influence_estimate(*, generation_id: str, artist_id: str, adapter_vers
                              dataset_hash: str | None = None, dataset_hash_note: str | None = None,
                              resemblance: Mapping | None = None,
                              extra_caveats: Sequence[str] = (), abstention: Mapping | None = None,
-                             calibration: Mapping | None = None) -> dict:
+                             calibration: Mapping | None = None, validation: Mapping | None = None,
+                             measured_error_pp: float | None = None) -> dict:
     """Shares → ranges → money → a validated document with ``method.kind`` ``dtrak``.
     An output the abstention rule refuses is never given one; an index with a readable
-    calibration block gives calibrated shares and cites that block's own validation."""
+    calibration block gives calibrated shares and cites that block's own validation; otherwise the
+    caller's ``validation`` and ``measured_error_pp`` are the kernel's, and without an error no estimate is made."""
     if abstention is not None and abstention.get("checked") and not abstention.get("accepted"):
         raise NotAttributable(abstention)
     cal = read_calibration(calibration, index_tracks=index.track_ids, artist_id=artist_id)
@@ -515,7 +491,10 @@ def build_influence_estimate(*, generation_id: str, artist_id: str, adapter_vers
     if without_rights:
         caveats.append(f"{len(without_rights)} of {len(share)} influencing tracks have no rights record; "
                        "their influence is reported as unattributed, not redistributed.")
-    error_pp = float(calibration.get("measured_error_pp") or MEASURED_ERROR_PP) if cal["applied"] else MEASURED_ERROR_PP
+    error_pp = (calibration.get("measured_error_pp") if cal["applied"] else None) or measured_error_pp
+    if error_pp is None:
+        raise InfluenceRefused("no measured error travels with this index; a share without its error is not given")
+    error_pp = float(error_pp)
     err = error_pp / 100.0
     ranges = {t: (max(0.0, v - err), min(1.0, v + err)) for t, v in share.items()}
     splits = blend.money_splits(share, ranges, rights)
@@ -565,7 +544,7 @@ def build_influence_estimate(*, generation_id: str, artist_id: str, adapter_vers
             "dataset_hash": dataset_hash,
             "measured_error_pp": error_pp,
             "validation": dict(calibration["validation"]) if cal["applied"] and calibration.get("validation")
-            else dict(VALIDATION),
+            else (dict(validation) if validation else None),
             "calibrated": bool(cal["applied"]),
         },
         "influence": influence,
