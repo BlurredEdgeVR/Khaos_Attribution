@@ -130,3 +130,7 @@ A track's rights record names its `source`: `operator-entered`, `society-confirm
 pip install -e ".[test]"
 pytest
 ```
+
+## Licence
+
+Khaos is free to use and is not open source. The source may be readable, but reading it grants no right to copy, modify or redistribute it; see `LICENSE`. Components written by others keep their own licences, and the base model's licence is its own.

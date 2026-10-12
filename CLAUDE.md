@@ -16,3 +16,7 @@ Code here is read by professionals; commentary earns its place or goes.
 - Section dividers are one line. No essay blocks, no "(2026-…)", no "(review)", no "(the artist, …)".
 
 A whole-codebase pass on 2026-09-14 removed about 20,000 lines of such commentary across the four repos. Do not put it back.
+
+## Licence (house rule)
+
+Khaos is free to use and is NOT open source. Never describe any Khaos repository, package, app or document as open source, open-sourced or MIT-licensed; say "free to use" (and, for the public contract, "source available"). Every repository's `LICENSE` is the Khaos Free Use Licence. Third-party components and the base model keep their own licences and are described as theirs.

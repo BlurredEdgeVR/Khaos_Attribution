@@ -1,21 +1,35 @@
-MIT License
+Khaos Free Use Licence
 
-Copyright (c) 2026 Khaos Foundation
+Copyright (c) 2026 Khaos Foundation. All rights reserved.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+This software is not open source. It is free to use.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+You may, without charge, install this software from a source the copyright
+holder publishes and run it for any lawful purpose, including making and
+releasing work with it commercially. What you make with it is yours, subject
+to the rights of the artists whose models you use.
+
+You may not, without the copyright holder's written permission:
+
+  - copy, publish, distribute or share the software or any part of it, other
+    than installing it as above;
+  - modify, translate or adapt it, or make works derived from it;
+  - sell, rent, lend, sublicense or host it as a service for others;
+  - remove or alter this notice.
+
+Reading the source does not grant any right to reuse it.
+
+Components written by others keep their own licences, listed in
+THIRD_PARTY_NOTICES.md where present. The base model's licence is the base
+model's own and is stated wherever a model card names it.
+
+Versions of this software published before 12 October 2026 were offered under
+the MIT licence; those copies keep the terms they were offered under. This
+licence applies to every version from that date.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
