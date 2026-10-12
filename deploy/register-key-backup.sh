@@ -7,7 +7,8 @@ set -euo pipefail
 HOST="${REGISTER_HOST:-register}"
 STAGED="${REGISTER_STAGED:-/srv/register/data/staged/register-key.pem}"
 
-server_hash() { ssh "$HOST" "sudo sha256sum $STAGED" | cut -d' ' -f1; }
+# The server's sudo must not ask for a password here: -n fails at once instead of hanging on no terminal.
+server_hash() { ssh "$HOST" "sudo -n sha256sum $STAGED" | cut -d' ' -f1; }
 
 case "${1:-}" in
 lock)
@@ -16,7 +17,8 @@ lock)
   [ -e "$OUT" ] && { echo "$OUT exists"; exit 1; }
   args=(); for r in "$@"; do args+=(-r "$r"); done
   # The key passes through memory only: what lands on this disk is already encrypted.
-  ssh "$HOST" "sudo cat $STAGED" | age "${args[@]}" -o "$OUT"
+  ssh "$HOST" "sudo -n cat $STAGED" | age "${args[@]}" -o "$OUT.part" || { rm -f "$OUT.part"; echo "lock failed; nothing written"; exit 1; }
+  mv "$OUT.part" "$OUT"
   echo "locked to $# keys: $OUT"
   echo "server's key sha256: $(server_hash)"
   echo "Now check it opens with each YubiKey: register-key-backup.sh check $OUT <identity-file>"

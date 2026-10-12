@@ -63,6 +63,19 @@ def test_the_register_needs_a_dev_or_real_key_and_never_makes_one_in_production(
         create_app({"data": tmp_path, "key_file": tmp_path / "none.pem", "dev_key": False, "public_url": "x"})
 
 
+def test_a_key_once_served_as_the_development_key_is_refused_without_the_setting(tmp_path):
+    """Deleting REGISTER_DEV_KEY by hand never promotes the development key; a ceremony key in its place serves."""
+    from register_service.app import load_register_key
+    cfg = {"data": tmp_path, "key_file": tmp_path / "register-key.pem", "dev_key": True, "public_url": "x"}
+    dev = load_register_key(cfg)
+    assert (tmp_path / "register-key.dev").read_text().strip() == dev.key_id
+    with pytest.raises(SystemExit, match="development key"):
+        load_register_key({**cfg, "dev_key": False})
+    (tmp_path / "register-key.pem").unlink()
+    ceremony = R.SigningKey.load_or_create(tmp_path / "register-key.pem")
+    assert load_register_key({**cfg, "dev_key": False}).key_id == ceremony.key_id != dev.key_id
+
+
 def test_enrolment_takes_an_invite_once_and_an_unenrolled_machine_cannot_publish(register):
     app, store, http = register
     key = R.SigningKey.generate()

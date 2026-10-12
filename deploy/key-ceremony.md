@@ -30,9 +30,9 @@ Two of the Foundation's directors, each with a YubiKey 5 (any 5-series key; the 
    ```
    register-key switch "Name, Name"
    ```
-   It retires the development key, signs with the new one, checks the server now says so, and writes the names and the key id into the public ledger. If any check fails it puts the development key back.
+   It retires the development key, signs with the new one, checks the server now says so, and writes the names and the key id into the public ledger. If the switch's check fails it puts the development key back; if only the ledger entry fails, the new key stays and the command to record it is printed.
 
-To restore the key onto a new server, plug in either YubiKey: `age -d -i yubikey-<name>.txt register-key.age`, piped straight to the server. Each step refuses to run twice, and neither server step runs once the development setting is gone, so the development key can never be promoted by deleting the setting alone. When more Guardians are named later, the same key is kept and their custody is recorded with `register-cli key --present "Name, Name" --note "custody"`.
+To restore the key onto a new server, plug in either YubiKey: `age -d -i yubikey-<name>.txt register-key.age`, piped straight to the server. Each step refuses to run twice, and neither server step runs once the development setting is gone. The service itself remembers which key it served as the development key and refuses to start on it without that setting, so deleting the setting by hand never promotes it. When more Guardians are named later, the same key is kept and their custody is recorded with `register-cli key --present "Name, Name" --note "custody"`.
 
 The full ceremony below keeps the key off the server's own tools while it is made. Use it when the Guardians want that.
 

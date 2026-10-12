@@ -33,14 +33,28 @@ def settings() -> dict:
             "public_url": os.environ.get("REGISTER_PUBLIC_URL", f"http://127.0.0.1:{DEFAULT_PORT}").rstrip("/")}
 
 
+def dev_marker(cfg: dict) -> Path:
+    return cfg["key_file"].with_suffix(".dev")
+
+
 def load_register_key(cfg: dict) -> R.SigningKey:
+    """The countersigning key; a key ever served as the development key is refused once that setting is gone."""
+    marker = dev_marker(cfg)
     if cfg["key_file"].is_file():
-        return R.SigningKey.load(cfg["key_file"])
+        key = R.SigningKey.load(cfg["key_file"])
+        if cfg["dev_key"]:
+            marker.write_text(key.key_id + "\n", encoding="utf-8")
+        elif marker.is_file() and marker.read_text(encoding="utf-8").strip() == key.key_id:
+            raise SystemExit(f"the key at {cfg['key_file']} is the development key ({key.key_id}); "
+                             "the Guild's key is placed by the ceremony (deploy/key-ceremony.md)")
+        return key
     if not cfg["dev_key"]:
         raise SystemExit(f"no register key at {cfg['key_file']}: the Guardians' key is made in the ceremony, never here "
                          "(REGISTER_DEV_KEY=1 makes a development key)")
     cfg["key_file"].parent.mkdir(parents=True, exist_ok=True)
-    return R.SigningKey.load_or_create(cfg["key_file"])
+    key = R.SigningKey.load_or_create(cfg["key_file"])
+    marker.write_text(key.key_id + "\n", encoding="utf-8")
+    return key
 
 
 def public_view(record: dict) -> dict:

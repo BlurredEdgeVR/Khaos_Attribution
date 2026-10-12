@@ -460,10 +460,9 @@ def build_influence_estimate(*, generation_id: str, artist_id: str, adapter_vers
                              extra_caveats: Sequence[str] = (), abstention: Mapping | None = None,
                              calibration: Mapping | None = None, validation: Mapping | None = None,
                              measured_error_pp: float | None = None) -> dict:
-    """Shares → ranges → money → a validated document with ``method.kind`` ``dtrak``.
-    An output the abstention rule refuses is never given one; an index with a readable
-    calibration block gives calibrated shares and cites that block's own validation; otherwise the
-    caller's ``validation`` and ``measured_error_pp`` are the kernel's, and without an error no estimate is made."""
+    """Shares, ranges and money as a validated ``dtrak`` document; a refused output gets none.
+    A readable calibration block supplies the shares, validation and error; otherwise the caller's
+    ``validation`` and ``measured_error_pp`` are the kernel's, and without an error no estimate is made."""
     if abstention is not None and abstention.get("checked") and not abstention.get("accepted"):
         raise NotAttributable(abstention)
     cal = read_calibration(calibration, index_tracks=index.track_ids, artist_id=artist_id)
