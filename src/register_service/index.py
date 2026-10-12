@@ -26,8 +26,8 @@ CREATE TABLE IF NOT EXISTS claims (claim_id INTEGER PRIMARY KEY, account_id INTE
 CREATE TABLE IF NOT EXISTS claim_fingerprints (hash INTEGER NOT NULL, claim_id INTEGER NOT NULL, offset_ms INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS claim_fingerprints_hash ON claim_fingerprints (hash);
 CREATE INDEX IF NOT EXISTS claim_fingerprints_claim ON claim_fingerprints (claim_id);
-CREATE TABLE IF NOT EXISTS claim_conflicts (at TEXT NOT NULL, account_id INTEGER NOT NULL, serial INTEGER NOT NULL,
-  track_id TEXT NOT NULL, held_by_claim INTEGER NOT NULL, votes INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS claim_shares (claim_id INTEGER NOT NULL, other_claim INTEGER NOT NULL, votes INTEGER NOT NULL,
+  at TEXT NOT NULL, PRIMARY KEY (claim_id, other_claim));
 """
 MAX_LANDMARKS = 200_000
 CANDIDATES = 50
@@ -38,10 +38,20 @@ class Index:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
-        self.db = sqlite3.connect(str(self.path), check_same_thread=False, isolation_level=None)
-        self.db.row_factory = sqlite3.Row
+        self._local = threading.local()
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.executescript(SCHEMA)
+
+    @property
+    def db(self) -> sqlite3.Connection:
+        """This thread's own connection: requests run on the loop and in the threadpool, and one connection shared
+        between threads mid-transaction corrupts reads."""
+        conn = getattr(self._local, "conn", None)
+        if conn is None:
+            conn = sqlite3.connect(str(self.path), isolation_level=None, timeout=30)
+            conn.row_factory = sqlite3.Row
+            self._local.conn = conn
+        return conn
 
     def release(self, generation_id: str, serial: int, payload: int, artist_id: str, fingerprint: list,
                 released_by: str, kind: str) -> dict:
@@ -134,22 +144,23 @@ class Index:
         return out
 
     def check_claim(self, phases: list, account_id: int) -> dict:
-        """Whether a recording is already a registered model's training track (none, this account's, or another's),
-        and the serial of the released output it is, when it is one."""
+        """Whether a recording already trains a registered model (none, this account's, or also another account's),
+        and the serial of the released output it is, when it is one. Nothing here refuses."""
         matches = self._claim_matches(phases)
         output = self.verify(phases, None)
         released = int(output["output"]["serial"]) if output["grade"] == "output" else None
         others = [(v, c) for v, c in matches if c["account_id"] != account_id]
         if others:
-            return {"grade": "other", "claim_ref": others[0][1]["claim_id"], "votes": others[0][0], "released_output": released}
+            return {"grade": "other", "claim_ref": others[0][1]["claim_id"], "votes": others[0][0], "released_output": released,
+                    "also_mine": len(others) < len(matches)}
         if matches:
             return {"grade": "mine", "serial": matches[0][1]["serial"], "track_id": matches[0][1]["track_id"], "released_output": released}
         return {"grade": "none", "released_output": released}
 
     def claim(self, account_id: int, serial: int, track_id: str, fingerprint: list, declaration: str, claimed_by: str,
               phases: list | None = None) -> dict:
-        """A registered model's training track, claimed for its account; refused when another account holds it first.
-        `phases`, the four-phase query of the same audio, is what the conflict test reads when given."""
+        """A registered model's training track, claimed on its account's declaration. A recording may train any number
+        of models; one another account also claims is linked to that claim, so both models' pages say it is shared."""
         rows = _landmarks(fingerprint)
         query = [_landmarks(p) for p in phases] if phases else [rows]
         with self._lock:
@@ -157,11 +168,6 @@ class Index:
             if have:
                 return {"claimed": True, "claim_ref": have["claim_id"], "already": True}
             others = [(v, c) for v, c in self._claim_matches(query) if c["account_id"] != account_id]
-            if others:
-                votes, held = others[0]
-                self.db.execute("INSERT INTO claim_conflicts (at, account_id, serial, track_id, held_by_claim, votes) VALUES (?, ?, ?, ?, ?, ?)",
-                                (now_utc(), account_id, serial, track_id, held["claim_id"], votes))
-                return {"claimed": False, "conflict": {"claim_ref": held["claim_id"], "votes": votes}}
             self.db.execute("BEGIN IMMEDIATE")
             try:
                 cur = self.db.execute("INSERT INTO claims (account_id, serial, track_id, declaration, claimed_at, claimed_by, landmarks)"
@@ -169,19 +175,22 @@ class Index:
                 cid = cur.lastrowid
                 self.db.executemany("INSERT INTO claim_fingerprints (hash, claim_id, offset_ms) VALUES (?, ?, ?)",
                                     [(h, cid, o) for h, o in rows])
+                self.db.executemany("INSERT OR IGNORE INTO claim_shares (claim_id, other_claim, votes, at) VALUES (?, ?, ?, ?)",
+                                    [(cid, c["claim_id"], v, now_utc()) for v, c in others])
                 self.db.execute("COMMIT")
             except BaseException:
                 self.db.execute("ROLLBACK")
                 raise
-        return {"claimed": True, "claim_ref": cid, "already": False}
+        return {"claimed": True, "claim_ref": cid, "already": False, "shared_with_accounts": len({c["account_id"] for _, c in others})}
 
     def release_claims(self, serial: int) -> int:
-        """A withdrawn model's claims end with it: the recordings are free for the account that owns them."""
+        """A withdrawn model's claims end with it, and so do the links that said another model shares them."""
         with self._lock:
             ids = [r["claim_id"] for r in self.db.execute("SELECT claim_id FROM claims WHERE serial = ?", (serial,))]
             self.db.execute("BEGIN IMMEDIATE")
             try:
                 self.db.executemany("DELETE FROM claim_fingerprints WHERE claim_id = ?", [(i,) for i in ids])
+                self.db.executemany("DELETE FROM claim_shares WHERE claim_id = ? OR other_claim = ?", [(i, i) for i in ids])
                 self.db.execute("DELETE FROM claims WHERE serial = ?", (serial,))
                 self.db.execute("COMMIT")
             except BaseException:
@@ -190,10 +199,13 @@ class Index:
         return len(ids)
 
     def claims_of(self, serial: int) -> dict:
-        """What a model's page says: how many of its training tracks are claimed, and how many were refused."""
+        """What a model's page says: how many of its training tracks are claimed, and how many another account's
+        registered model also trained on."""
         claimed = int(self.db.execute("SELECT COUNT(*) FROM claims WHERE serial = ?", (serial,)).fetchone()[0])
-        refused = int(self.db.execute("SELECT COUNT(DISTINCT track_id) FROM claim_conflicts WHERE serial = ?", (serial,)).fetchone()[0])
-        return {"claimed": claimed, "refused": refused}
+        shared = int(self.db.execute(
+            "SELECT COUNT(DISTINCT c.claim_id) FROM claims c JOIN claim_shares s ON s.claim_id = c.claim_id OR s.other_claim = c.claim_id"
+            " WHERE c.serial = ?", (serial,)).fetchone()[0])
+        return {"claimed": claimed, "shared": shared}
 
 
 def _landmarks(fingerprint) -> list:

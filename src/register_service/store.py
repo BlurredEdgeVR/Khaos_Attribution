@@ -43,10 +43,20 @@ class Store:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
-        self.db = sqlite3.connect(str(self.path), check_same_thread=False, isolation_level=None)
-        self.db.row_factory = sqlite3.Row
+        self._local = threading.local()
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.executescript(SCHEMA)
+
+    @property
+    def db(self) -> sqlite3.Connection:
+        """This thread's own connection: requests run on the loop and in the threadpool, and one connection shared
+        between threads mid-transaction corrupts reads."""
+        conn = getattr(self._local, "conn", None)
+        if conn is None:
+            conn = sqlite3.connect(str(self.path), isolation_level=None, timeout=30)
+            conn.row_factory = sqlite3.Row
+            self._local.conn = conn
+        return conn
 
     # ---- accounts and invites (the operator's, by command line) ----
 

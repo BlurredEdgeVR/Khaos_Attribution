@@ -140,10 +140,10 @@ def _ph(audio, sr):
     return [[list(l) for l in p] for p in query_phases(audio, sr)]
 
 
-def test_a_training_track_is_claimed_once_and_another_accounts_claim_on_it_is_refused(register, tmp_path):
-    """The first account to register a model on a recording holds it; another account's claim is refused, counted and
-    set aside by the outbox; the same account may train on it again; a claim names one of the record's own tracks;
-    withdrawing the model frees its recordings; only a Workshop claims or checks."""
+def test_a_recording_may_train_many_models_and_every_page_says_when_it_is_shared(register, tmp_path):
+    """Claims are a record, not a lock: another account's claim on the same recording is taken and linked, both models'
+    pages say so, a long piece holding a claimed track is found either way round, a claim names one of the record's
+    own tracks, withdrawal ends a model's claims and their links, and only a Workshop claims or checks."""
     app, store, http = register
     key, one = _machine(register, "artist-one")
     key2, two = _machine(register, "artist-two")
@@ -156,7 +156,7 @@ def test_a_training_track_is_claimed_once_and_another_accounts_claim_on_it_is_re
     with pytest.raises(R.RegisterError, match="training tracks the model's own record lists"):
         one.claim(first["record_sha256"], "not-in-the-record", fps, "khaos.declaration/1")
     out = one.claim(first["record_sha256"], "t1", fps, "khaos.declaration/1", phases=_ph(audio, sr))
-    assert out["claimed"] is True and out["already"] is False and out["serial"] == serial
+    assert out["claimed"] is True and out["already"] is False and out["serial"] == serial and out["shared_with_accounts"] == 0
     assert one.claim(first["record_sha256"], "t1", fps, "khaos.declaration/1")["already"] is True
     mine = one.check_claim(_ph(audio, sr))
     assert mine["grade"] == "mine" and mine["serial"] == serial and mine["track_id"] == "t1" and mine["released_output"] is None
@@ -164,26 +164,76 @@ def test_a_training_track_is_claimed_once_and_another_accounts_claim_on_it_is_re
     assert theirs["grade"] == "other" and "serial" not in theirs and "track_id" not in theirs
     with pytest.raises(R.RegisterError, match="only a Workshop"):
         space.check_claim(_ph(audio, sr))
-    second = _signed(key2, training_set=_tracks("x1", "x2", "x3", "x4"))
+    second = _signed(key2, training_set=_tracks("x1", "x2", "x3"))
     serial2 = two.publish(second)["serial"]
-    with pytest.raises(R.RegisterError) as refused:
-        two.claim(second["record_sha256"], "x1", fps, "khaos.declaration/1")
-    assert refused.value.status == 403 and "another account" in str(refused.value)
-    assert two.claim(second["record_sha256"], "x2", _fp(*_music(5, 20.0)), "khaos.declaration/1")["claimed"]
-    assert http.get(f"/api/models/{serial2}/claims").json() == {"serial": serial2, "tracks": 4, "claimed": 1, "refused": 1}
-    # A long piece holding the claimed track is caught either way round.
+    shared = two.claim(second["record_sha256"], "x1", fps, "khaos.declaration/1")
+    assert shared["claimed"] is True and shared["shared_with_accounts"] == 1, "another account trains on it too, and it is said"
+    assert two.claim(second["record_sha256"], "x2", _fp(*_music(5, 20.0)), "khaos.declaration/1")["shared_with_accounts"] == 0
+    assert http.get(f"/api/models/{serial2}/claims").json() == {"serial": serial2, "tracks": 3, "claimed": 2, "shared": 1}
+    assert http.get(f"/api/models/{serial}/claims").json() == {"serial": serial, "tracks": 1, "claimed": 1, "shared": 1}
+    page = __import__("html").unescape(http.get(f"/models/{serial}").text)
+    assert "1 of 1 claimed on the artist's declaration · 1 also trains another account's registered model" in page
     medley = np.concatenate([_music(7, 60.0)[0], audio, _music(8, 60.0)[0]])
-    assert two.check_claim(_ph(medley, sr))["grade"] == "other"
+    both = one.check_claim(_ph(medley, sr))
+    assert both["grade"] == "other" and both["also_mine"] is True, "a claimed track inside a long piece is found, and both claims are said"
     box = R.Outbox(tmp_path / "box")
-    box.append("claim", {"record_sha256": second["record_sha256"], "track_id": "x3", "fingerprint": fps,
+    box.append("claim", {"record_sha256": second["record_sha256"], "track_id": "x3", "fingerprint": _fp(*_music(6, 20.0)),
                          "declaration": "khaos.declaration/1", "nonce": "claim-nonce-1"})
-    box.append("claim", {"record_sha256": second["record_sha256"], "track_id": "x4",
-                         "fingerprint": _fp(*_music(6, 20.0)), "declaration": "khaos.declaration/1", "nonce": "claim-nonce-2"})
-    done = two.sync(box)
-    assert len(done) == 1 and len(box.refused()) == 1 and "another account" in json.dumps(box.refused())
+    assert len(two.sync(box)) == 1 and not box.refused()
     with pytest.raises(R.RegisterError, match="own account"):
         two.claim(first["record_sha256"], "t1", fps, "khaos.declaration/1")
-    # Withdrawn, the first model's claims end with it, and the recording is free to claim.
     one.withdraw(serial, "consent withdrawn")
-    assert two.check_claim(_ph(audio, sr))["grade"] == "none"
-    assert two.claim(second["record_sha256"], "x1", fps, "khaos.declaration/1")["claimed"] is True
+    assert http.get(f"/api/models/{serial2}/claims").json()["shared"] == 0, "the link ends with the withdrawn model's claim"
+    assert one.check_claim(_ph(audio, sr))["grade"] == "other"
+
+
+def test_the_index_answers_readers_while_another_thread_claims(tmp_path):
+    """Requests run on the loop and in the threadpool: every claim lands and no reader errors while they are written."""
+    import random
+    import threading
+    from register_service.index import Index
+    ix = Index(tmp_path / "i.sqlite3")
+
+    def fp(seed, n=5000):
+        r = random.Random(seed)
+        return [[r.randrange(1 << 30), i * 10] for i in range(n)]
+    errors, stop = [], threading.Event()
+
+    def writer():
+        for k in range(20):
+            try:
+                ix.claim(1, k, f"t{k}", fp(k), "d", "key")
+                ix.release(f"g{k}", k, 1, "a", fp(1000 + k), "key", "workshop")
+            except Exception as e:  # noqa: BLE001
+                errors.append(repr(e))
+
+    def reader():
+        q = [[tuple(x) for x in fp(3)[:1500]]]
+        while not stop.is_set():
+            try:
+                ix.check_claim(q, 2), ix.claims_of(3), ix.verify(q, None)
+            except Exception as e:  # noqa: BLE001
+                errors.append(repr(e))
+    readers = [threading.Thread(target=reader) for _ in range(3)]
+    for t in readers:
+        t.start()
+    w = threading.Thread(target=writer)
+    w.start(); w.join(); stop.set()
+    for t in readers:
+        t.join()
+    assert errors == [] and ix.db.execute("SELECT COUNT(*) FROM claims").fetchone()[0] == 20
+
+
+def test_a_claim_sent_as_phases_alone_stores_the_first_phase_and_a_twelve_minute_track_fits(register):
+    """The fingerprint is the first phase, so it is not sent twice; a long track's four phases fit the claim allowance."""
+    from register_service.app import CLAIM_MAX_BODY
+    app, store, http = register
+    key, one = _machine(register, "artist-one")
+    first = _signed(key)
+    one.publish(first)
+    audio, sr = _music(3, seconds=20.0)
+    out = one.claim(first["record_sha256"], "t1", declaration="khaos.declaration/1", phases=_ph(audio, sr))
+    assert out["claimed"] is True
+    assert app.state.index.db.execute("SELECT landmarks FROM claims").fetchone()[0] == len(_fp(audio, sr))
+    per_second = len(R.canonical_bytes({"phases": _ph(audio, sr)})) / 20.0
+    assert per_second * 720 * 2 < CLAIM_MAX_BODY, "denser music than this test piece still fits a twelve-minute track"

@@ -23,6 +23,7 @@ from register_service.index import Index
 from register_service.store import Store, now_utc
 
 MAX_BODY = 8_000_000   # a long output's four-phase fingerprint runs to a few megabytes
+CLAIM_MAX_BODY = 24_000_000   # a twelve-minute track's four phases, with room
 DEFAULT_PORT = 8912   # 8900 is the Engine Room's
 log = logging.getLogger("register_service")
 
@@ -111,9 +112,9 @@ def create_app(cfg: dict | None = None) -> FastAPI:
     app = FastAPI(title="Guild Register", docs_url=None, redoc_url=None)
     app.state.store, app.state.index, app.state.key, app.state.cfg = store, index, key, cfg
 
-    async def signed_body(request: Request, enrolling: bool = False) -> tuple:
+    async def signed_body(request: Request, enrolling: bool = False, limit: int = MAX_BODY) -> tuple:
         raw = await request.body()
-        if len(raw) > MAX_BODY:
+        if len(raw) > limit:
             raise HTTPException(413, "too large")
         try:
             body = json.loads(raw)
@@ -302,8 +303,8 @@ def create_app(cfg: dict | None = None) -> FastAPI:
 
     @app.post("/api/claims")
     async def claims(request: Request):
-        """A registered model's training track, claimed for the model's account by the record it was registered under."""
-        body, machine, key_id, _ = await signed_body(request)
+        """A registered model's training track, claimed on its account's declaration by the record it was registered under."""
+        body, machine, key_id, _ = await signed_body(request, limit=CLAIM_MAX_BODY)
         workshop_only(machine)
 
         def work():
@@ -325,22 +326,19 @@ def create_app(cfg: dict | None = None) -> FastAPI:
             phases = body.get("phases")
             if phases is not None and not (isinstance(phases, list) and all(isinstance(p, list) for p in phases) and len(phases) <= 8):
                 raise HTTPException(422, "phases is a short list of fingerprint lists")
+            fingerprint = body.get("fingerprint") or (phases[0] if phases else None)
             try:
-                out = index.claim(rec["account_id"], rec["serial"], track_id, body.get("fingerprint"), declaration, key_id, phases)
+                out = index.claim(rec["account_id"], rec["serial"], track_id, fingerprint, declaration, key_id, phases)
             except ValueError as e:
                 raise HTTPException(422, str(e)) from None
-            if not out["claimed"]:
-                # Refused for what it is, so a Workshop's outbox sets it aside instead of stopping on it.
-                raise HTTPException(403, f"this recording is already a training track of another account's registered model "
-                                         f"(claim {out['conflict']['claim_ref']}); a dispute goes to the Foundation")
             return {"serial": rec["serial"], "track_id": track_id, **out}
         # The fingerprint matching is heavy: off the event loop, so verify and enrol stay answered meanwhile.
         return await run_in_threadpool(once, body, key_id, work)
 
     @app.post("/api/claims/check")
     async def claims_check(request: Request):
-        """Whether a recording is already claimed (by nobody, this machine's account, or another account) and
-        whether it is a released output: the Workshop's one question at import."""
+        """Whether a recording already trains a registered model (nobody's, this account's, or also another account's)
+        and whether it is a released output: the Workshop's one question at import."""
         body, machine, _, _ = await signed_body(request)
         workshop_only(machine)
         return await run_in_threadpool(index.check_claim, phases_of(body), machine["account_id"])
@@ -390,6 +388,13 @@ def create_app(cfg: dict | None = None) -> FastAPI:
             answer["models"] = [_model_summary(store.record(s)) for s in store.serials_in_bucket(payload)]
         return answer
 
+    def _claims_line(c: dict, total: int) -> str:
+        from register_service import pages as P  # noqa: PLC0415
+        line = f"{c['claimed']} of {total} claimed on the artist's declaration"
+        if c["shared"]:
+            line += f" · {c['shared']} also train{'s' if c['shared'] == 1 else ''} another account's registered model"
+        return P.esc(line)
+
     def _model_summary(rec: dict) -> dict:
         r = rec["signed"]["record"]
         return {"serial": rec["serial"], "artist_id": r["artist_id"], "artist_name": r["artist_name"], "run_id": r["model"]["run_id"],
@@ -435,6 +440,7 @@ def create_app(cfg: dict | None = None) -> FastAPI:
               ("Dataset hash", f'<span class="mono">{P.esc(r["provenance"]["dataset_hash"])}</span>'),
               ("Watermark bucket", P.esc(m["watermark_payload"])),
               ("Countersigned by", f'<span class="mono">{P.esc(rec["countersignature"]["register_key_id"])}</span>'),
+              ("Training tracks", _claims_line(index.claims_of(serial), len((rec["signed"]["record"].get("training_set") or {}).get("tracks") or []))),
               ("Registered", P.esc(rec["published_at"]))]
         body += P.section("The record", "every value as the artist's Workshop attested it")
         body += P.table("200px minmax(0, 1fr)", ["", ""], [[(f'<span class="stage-kv-label">{P.esc(k)}</span>', ""), (v, "wrap")] for k, v in kv])

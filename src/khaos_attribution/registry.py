@@ -396,18 +396,20 @@ class RegisterClient:
         return self._post("/api/outputs", {"generation_id": generation_id, "serial": serial, "fingerprint": fingerprint,
                                            "nonce": nonce or secrets.token_hex(8)})
 
-    def claim(self, record_sha256: str, track_id: str, fingerprint: list, declaration: str, nonce: str | None = None,
-              phases: list | None = None) -> dict:
-        """A registered model's training track, claimed for the model's account; refused when another account holds it."""
-        body = {"record_sha256": record_sha256, "track_id": track_id, "fingerprint": fingerprint,
-                "declaration": declaration, "nonce": nonce or secrets.token_hex(8)}
+    def claim(self, record_sha256: str, track_id: str, fingerprint: list | None = None, declaration: str = "",
+              nonce: str | None = None, phases: list | None = None) -> dict:
+        """A registered model's training track, claimed on the account's declaration; a recording may train many models.
+        With `phases` the fingerprint is their first, so it need not be sent twice."""
+        body = {"record_sha256": record_sha256, "track_id": track_id, "declaration": declaration, "nonce": nonce or secrets.token_hex(8)}
+        if fingerprint is not None:
+            body["fingerprint"] = fingerprint
         if phases is not None:
             body["phases"] = phases
         return self._post("/api/claims", body)
 
     def check_claim(self, phases: list) -> dict:
-        """Whether a recording is already a registered model's training track (grade none, mine or other) and the
-        serial of the released output it is, if any."""
+        """Whether a recording already trains a registered model (grade none, mine or other) and the serial of the
+        released output it is, if any."""
         return self._post("/api/claims/check", {"phases": phases, "nonce": secrets.token_hex(8)})
 
     def verify(self, phases: list, watermark_id: int | None = None) -> dict:
