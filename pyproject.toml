@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "khaos_attribution"
-version = "0.28.1"
+version = "0.29.0"
 description = "JSON schemas and validators for artist attribution: provenance records and model cards."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -26,6 +26,8 @@ artwork = ["pillow>=10"]
 gradient = ["torch>=2.2"]
 # registry.py: Ed25519 for machine keys and the register's countersignature.
 registry = ["cryptography>=42"]
+# credentials.py: Content Credentials (C2PA) signed into every output.
+credentials = ["c2pa-python>=0.38; python_version >= '3.10'", "cryptography>=42"]
 # register_service: the register itself, on its own machine.
 service = ["cryptography>=42", "fastapi>=0.110", "uvicorn>=0.27"]
 
