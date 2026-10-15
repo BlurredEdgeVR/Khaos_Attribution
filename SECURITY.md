@@ -11,5 +11,5 @@ attribution package, tell us privately first.
 We acknowledge every report, tell you what we will do about it, and keep you told until it is closed. Security fixes
 are made to the latest release; the release notes say which problems a release fixes.
 
-What is in each build is listed in its software bill of materials (`sbom.cdx.json`, beside the code in a built app;
-`scripts/sbom.py` writes one from the lock file).
+What is in each Khaos Workshop build is listed in its software bill of materials (`sbom.cdx.json`, beside the code in
+the built app).

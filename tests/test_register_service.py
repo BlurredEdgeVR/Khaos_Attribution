@@ -341,6 +341,11 @@ def test_the_model_page_states_what_trained_the_model_and_how_it_was_declared(re
     assert "sections of the full mix, each with a written description" in page
     assert "3 of 3 tracks, the artist confirming each of: the songs, the recordings, the performers" in page
     bad = _record()
+    for wrong in ({"layers": [], "declared": 1, "of": 1}, {"layers": ["composition"], "declared": 5, "of": 3},
+                  {"layers": ["composition"], "declared": -1, "of": 3}):
+        probe = _record()
+        probe["training_set"]["declaration"] = wrong
+        assert any("declaration" in p for p in RG.record_problems(probe)), wrong
     bad["training_set"]["declaration"] = {"layers": "all", "declared": 1, "of": 1}
     bad["training_set"]["data_kinds"] = ["", 3]
     problems = RG.record_problems(bad)
