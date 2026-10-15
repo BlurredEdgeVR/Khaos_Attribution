@@ -395,6 +395,12 @@ def create_app(cfg: dict | None = None) -> FastAPI:
             answer["models"] = [_model_summary(store.record(s)) for s in store.serials_in_bucket(payload)]
         return answer
 
+    def _declared_line(d: dict) -> str:
+        layers = {"composition": "the songs", "recording": "the recordings", "performers": "the performers",
+                  "voices": "other voices", "society": "the collecting society"}
+        named = ", ".join(layers.get(x, x) for x in d.get("layers") or [])
+        return f"{d.get('declared', 0)} of {d.get('of', 0)} tracks, the artist confirming each of: {named}"
+
     def _claims_line(c: dict, total: int) -> str:
         from register_service import pages as P  # noqa: PLC0415
         line = f"{c['claimed']} of {total} claimed on the artist's declaration"
@@ -448,6 +454,8 @@ def create_app(cfg: dict | None = None) -> FastAPI:
               ("Watermark bucket", P.esc(m["watermark_payload"])),
               ("Countersigned by", f'<span class="mono">{P.esc(rec["countersignature"]["register_key_id"])}</span>'),
               ("Training tracks", _claims_line(index.claims_of(serial), len((rec["signed"]["record"].get("training_set") or {}).get("tracks") or []))),
+              *([("Trained on", P.esc("; ".join(ts["data_kinds"])))] if ts.get("data_kinds") else []),
+              *([("Declared", P.esc(_declared_line(ts["declaration"])))] if ts.get("declaration") else []),
               ("Registered", P.esc(rec["published_at"]))]
         body += P.section("The record", "every value as the artist's Workshop attested it")
         body += P.table("200px minmax(0, 1fr)", ["", ""], [[(f'<span class="stage-kv-label">{P.esc(k)}</span>', ""), (v, "wrap")] for k, v in kv])

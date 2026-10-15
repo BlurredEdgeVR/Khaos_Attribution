@@ -195,6 +195,15 @@ def record_problems(record: dict) -> list:
                     out.append(f"training_set.tracks[{i}].writers[{j}] must have a name and a numeric share")
     if "rights_sha256" in ts and ts["rights_sha256"] is not None and not _is_sha256(ts["rights_sha256"]):
         out.append("training_set.rights_sha256 must be a sha256 hex digest or null")
+    decl = ts.get("declaration")
+    if decl is not None:
+        if (not isinstance(decl, dict) or not isinstance(decl.get("layers"), list)
+                or not all(isinstance(x, str) for x in decl["layers"])
+                or any(not isinstance(decl.get(k), int) or isinstance(decl.get(k), bool) for k in ("declared", "of"))):
+            out.append("training_set.declaration must name its layers and count declared of the tracks")
+    kinds = ts.get("data_kinds")
+    if kinds is not None and (not isinstance(kinds, list) or not all(isinstance(k, str) and k for k in kinds)):
+        out.append("training_set.data_kinds must be a list of words")
     if record["public_view"] == "writers" and ts.get("writers_agreed") is not True:
         out.append("public_view 'writers' needs training_set.writers_agreed: true, every named writer having agreed")
     return out

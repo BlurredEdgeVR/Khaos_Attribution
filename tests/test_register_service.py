@@ -322,3 +322,26 @@ def test_a_verify_key_holder_is_never_rate_limited_and_only_its_hash_is_kept(reg
     assert verify_keys.revoke(cfg, "A newsroom") == 1
     with pytest.raises(ValueError):
         verify_keys.issue(cfg, "Someone", "anyone")
+
+
+def test_the_model_page_states_what_trained_the_model_and_how_it_was_declared(register):
+    """The training-data statement in a record is checked by the contract and shown on the public page."""
+    from khaos_attribution import registry as RG
+    app, store, http = register
+    key, client = _machine(register, "artist-one")
+    rec = _record()
+    rec["training_set"]["declaration"] = {"version": "khaos.declaration/2", "layers": ["composition", "recording", "performers",
+                                          "voices", "society"], "declared": 3, "of": 3}
+    rec["training_set"]["data_kinds"] = ["sections of the full mix, each with a written description"]
+    assert RG.record_problems(rec) == []
+    rec["model"]["machine_key_id"] = key.key_id
+    rec["model"]["watermark_payload"] = derive_payload(key.key_id, rec["model"]["run_id"])
+    serial = client.publish(R.sign_record(rec, key))["serial"]
+    page = http.get(f"/models/{serial}").text
+    assert "sections of the full mix, each with a written description" in page
+    assert "3 of 3 tracks, the artist confirming each of: the songs, the recordings, the performers" in page
+    bad = _record()
+    bad["training_set"]["declaration"] = {"layers": "all", "declared": 1, "of": 1}
+    bad["training_set"]["data_kinds"] = ["", 3]
+    problems = RG.record_problems(bad)
+    assert any("declaration" in p for p in problems) and any("data_kinds" in p for p in problems)
