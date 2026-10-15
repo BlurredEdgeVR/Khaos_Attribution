@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "khaos_attribution"
-version = "0.29.0"
+version = "0.30.0"
 description = "JSON schemas and validators for artist attribution: provenance records and model cards."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -28,8 +28,14 @@ gradient = ["torch>=2.2"]
 registry = ["cryptography>=42"]
 # credentials.py: Content Credentials (C2PA) signed into every output.
 credentials = ["c2pa-python>=0.38; python_version >= '3.10'", "cryptography>=42"]
+# verify.py: the khaos-verify command reads the record and fingerprints the audio; `detector` adds the watermark.
+verify = ["soundfile>=0.12", "c2pa-python>=0.38; python_version >= '3.10'", "cryptography>=42"]
+detector = ["audioseal>=0.2", "torch>=2.2", "torchaudio>=2.2"]
 # register_service: the register itself, on its own machine.
 service = ["cryptography>=42", "fastapi>=0.110", "uvicorn>=0.27"]
+
+[project.scripts]
+khaos-verify = "khaos_attribution.verify:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

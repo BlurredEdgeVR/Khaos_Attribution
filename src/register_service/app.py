@@ -98,6 +98,8 @@ class RateLimit:
 
 PUBLIC_LIMITS = {"/api/verify": 20, "/api/enrol": 6}
 SIGNED_LIMIT = 120
+# A verify key's own lane: far above the public bound, still a bound, per key.
+KEYED_VERIFY_LIMIT = 600
 # A Publish checks and claims every training track at once; a large catalogue must fit in a minute.
 CLAIM_LIMITS = {"/api/claims": 600, "/api/claims/check": 600}
 
@@ -168,6 +170,9 @@ def create_app(cfg: dict | None = None) -> FastAPI:
 
     limits = {path: RateLimit(n) for path, n in {**PUBLIC_LIMITS, **CLAIM_LIMITS}.items()}
     signed_limit = RateLimit(SIGNED_LIMIT)
+    from register_service.verify_keys import Allowed  # noqa: PLC0415
+    verify_key_allowed = Allowed(cfg)
+    keyed_verify_limit = RateLimit(KEYED_VERIFY_LIMIT)
 
     @app.middleware("http")
     async def rate_limited(request: Request, call_next):
@@ -176,6 +181,8 @@ def create_app(cfg: dict | None = None) -> FastAPI:
         path = request.url.path
         if request.method == "POST":
             bucket = limits.get(path) or (signed_limit if path.startswith("/api/") else None)
+            if path == "/api/verify" and verify_key_allowed(request.headers.get("x-khaos-verify-key")):
+                client, bucket = "key:" + request.headers["x-khaos-verify-key"].strip(), keyed_verify_limit
             if bucket is not None and not bucket.allow(client):
                 return JSONResponse({"detail": "too many requests from this address; try again in a minute"}, status_code=429,
                                     headers={"Retry-After": "60"})
@@ -380,7 +387,7 @@ def create_app(cfg: dict | None = None) -> FastAPI:
             if decoded is None:
                 raise HTTPException(422, "watermark_id is not a codeword")
             payload = decoded[0]
-        answer = index.verify(phases, payload)
+        answer = await run_in_threadpool(index.verify, phases, payload)
         if answer["grade"] == "output":
             rec = store.record(int(answer["output"]["serial"]))
             answer["model"] = _model_summary(rec) if rec else None

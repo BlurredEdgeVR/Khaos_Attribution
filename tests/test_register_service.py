@@ -304,3 +304,21 @@ def test_the_public_doors_take_a_bounded_number_of_calls_a_minute_per_address(re
     bucket = RateLimit(6)
     assert all(bucket.allow("a", now=0.0) for _ in range(6)) and not bucket.allow("a", now=0.0)
     assert bucket.allow("a", now=10.0), "refills at the rate: one token every ten seconds at six a minute"
+
+
+def test_a_verify_key_holder_is_never_rate_limited_and_only_its_hash_is_kept(register):
+    """Authorities, researchers and media get an unlimited, free lane; a wrong or revoked key gets the public one."""
+    from register_service import verify_keys
+    from register_service.app import PUBLIC_LIMITS
+    app, store, http = register
+    cfg = {"data": store.path.parent}
+    key = verify_keys.issue(cfg, "A newsroom", "media")
+    assert key not in verify_keys._path(cfg).read_text()
+    bad = {"phases": [[[1, 2]]]}
+    n = PUBLIC_LIMITS["/api/verify"] + 5
+    assert {http.post("/api/verify", json=bad, headers={"X-Khaos-Verify-Key": key}).status_code for _ in range(n)} == {200}
+    wrong = [http.post("/api/verify", json=bad, headers={"X-Khaos-Verify-Key": key + "x"}).status_code for _ in range(n)]
+    assert 429 in wrong
+    assert verify_keys.revoke(cfg, "A newsroom") == 1
+    with pytest.raises(ValueError):
+        verify_keys.issue(cfg, "Someone", "anyone")

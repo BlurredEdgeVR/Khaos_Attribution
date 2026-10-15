@@ -44,6 +44,24 @@ values) when a record does not match its schema.
 The raw schema files are bundled with the package and can be loaded with
 `khaos_attribution.load_schema("provenance_record.schema.json")`.
 
+## Verify a file
+
+Every Khaos output carries two marks: an inaudible watermark and a signed, time-stamped record (C2PA Content
+Credentials) saying it is AI-generated. To check a file:
+
+```bash
+pip install "khaos-attribution[verify,detector] @ git+https://github.com/BlurredEdgeVR/Khaos_Attribution.git"
+khaos-verify song.wav                      # WAV, FLAC, MP3, OGG; M4A and AAC need FFmpeg
+khaos-verify song.mp3 --register https://register.example --json
+```
+
+The answer is one of five verdicts. **confirmed**: the audio matches a released Khaos output in the Register's
+index. **signed**: an intact signed record claims Khaos made it; the signing machine is not yet certified, so this
+alone is not proof. **tampered**: the file was changed after it was signed. **marked**: a watermark alone, which
+is not proof either. **none**: no Khaos mark was found, which never proves a person made the audio. Files longer
+than 20 minutes are not decoded. Authorities, researchers and the press can ask the Register for a verify key,
+which lifts the per-address limit (`--key` or `KHAOS_VERIFY_KEY`).
+
 ## Provenance record fields
 
 A provenance record travels with a generated output and says exactly how it

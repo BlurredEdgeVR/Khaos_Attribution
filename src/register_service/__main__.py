@@ -4,6 +4,8 @@
     python -m register_service invite <account> [--role workshop|space]
     python -m register_service revoke <machine_key_id> <reason>
     python -m register_service check
+    python -m register_service verify-key <holder> --kind authority|research|media    a key shown once
+    python -m register_service verify-key <holder> --revoke
     python -m register_service make-key <path>            a new countersigning key, on the ceremony's machine
     python -m register_service key --present "A, B, C"    the ledger's record of the key the service now signs with
 """
@@ -23,6 +25,7 @@ def main(argv=None) -> int:
     i = sub.add_parser("invite"); i.add_argument("account"); i.add_argument("--role", choices=("workshop", "space"), default="workshop")
     r = sub.add_parser("revoke"); r.add_argument("key_id"); r.add_argument("reason")
     sub.add_parser("check")
+    v = sub.add_parser("verify-key"); v.add_argument("holder"); v.add_argument("--kind", default="research"); v.add_argument("--revoke", action="store_true")
     sub.add_parser("make-key").add_argument("path")
     k = sub.add_parser("key"); k.add_argument("--present", required=True, help="who was there, comma-separated"); k.add_argument("--note", default="")
     a = p.parse_args(argv)
@@ -36,6 +39,13 @@ def main(argv=None) -> int:
         path.parent.mkdir(parents=True, exist_ok=True)
         key = SigningKey.load_or_create(path)
         print(f"key id {key.key_id}\n{key.public_pem()}", end="")
+        return 0
+    if a.cmd == "verify-key":
+        from register_service import verify_keys  # noqa: PLC0415
+        if a.revoke:
+            print(f"revoked {verify_keys.revoke(cfg, a.holder)} key(s) of {a.holder}")
+        else:
+            print(f"{verify_keys.issue(cfg, a.holder, a.kind)}\n(shown once; give it to {a.holder})")
         return 0
     if a.cmd == "serve":
         import uvicorn  # noqa: PLC0415

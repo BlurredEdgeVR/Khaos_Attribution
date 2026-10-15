@@ -117,17 +117,17 @@ def dominant(votes: int, runner_up: int, ratio: float = 2.0) -> bool:
 
 
 def fingerprint_file(path) -> list:
-    import soundfile as sf
+    from khaos_attribution.verify import load_audio  # noqa: PLC0415
 
-    audio, sample_rate = sf.read(str(path), dtype="float32", always_2d=True)
+    audio, sample_rate = load_audio(path)
     return fingerprint_array(audio, sample_rate)
 
 
 def query_phases_file(path, phases: int = QUERY_PHASES) -> list:
     """The four-phase query of a file, for asking the register's index."""
-    import soundfile as sf
+    from khaos_attribution.verify import load_audio  # noqa: PLC0415
 
-    audio, sample_rate = sf.read(str(path), dtype="float32", always_2d=True)
+    audio, sample_rate = load_audio(path)
     return query_phases(audio, sample_rate, phases)
 
 

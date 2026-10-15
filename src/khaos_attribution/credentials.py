@@ -314,21 +314,28 @@ def read_file(path: Path | str) -> dict:
         out["reason"] = str(exc)[:200]
         return out
     try:
-        active = reader.get_active_manifest() or {}
-        results = (reader.get_validation_results() or {}).get("activeManifest") or {}
-        codes = {r.get("code") for kind in ("success", "informational", "failure") for r in results.get(kind, [])}
-        out.update(present=bool(active), state=reader.get_validation_state())
-        for a in active.get("assertions", []):
-            data = a.get("data") or {}
-            if a.get("label", "").startswith("c2pa.actions"):
-                out["ai_generated"] = out["ai_generated"] or any(
-                    act.get("digitalSourceType") == DIGITAL_SOURCE_TYPE for act in data.get("actions", []))
-            elif a.get("label") == KHAOS_ASSERTION:
-                out["khaos"] = data
-        info = active.get("signature_info") or {}
-        out["signer"] = info.get("common_name") or info.get("issuer")
-        out["timestamped"] = "timeStamp.validated" in codes
-        out["trusted"] = out["state"] == "Trusted"
+        return _summarise(reader, out)
+    except Exception as exc:  # noqa: BLE001 — a manifest the SDK cannot summarise reads as present but not intact
+        out.update(present=True, state="Invalid", reason=str(exc)[:200])
+        return out
     finally:
         reader.close()
+
+
+def _summarise(reader, out: dict) -> dict:
+    active = reader.get_active_manifest() or {}
+    results = (reader.get_validation_results() or {}).get("activeManifest") or {}
+    codes = {r.get("code") for kind in ("success", "informational", "failure") for r in results.get(kind, [])}
+    out.update(present=bool(active), state=reader.get_validation_state())
+    for a in active.get("assertions", []):
+        data = a.get("data") or {}
+        if a.get("label", "").startswith("c2pa.actions"):
+            out["ai_generated"] = out["ai_generated"] or any(
+                act.get("digitalSourceType") == DIGITAL_SOURCE_TYPE for act in data.get("actions", []))
+        elif a.get("label") == KHAOS_ASSERTION:
+            out["khaos"] = data
+    info = active.get("signature_info") or {}
+    out["signer"] = info.get("common_name") or info.get("issuer")
+    out["timestamped"] = "timeStamp.validated" in codes
+    out["trusted"] = out["state"] == "Trusted"
     return out
