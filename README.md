@@ -59,8 +59,8 @@ The answer is one of five verdicts. **confirmed**: the audio matches a released 
 index. **signed**: an intact signed record claims Khaos made it; the signing machine is not yet certified, so this
 alone is not proof. **tampered**: the file was changed after it was signed. **marked**: a watermark alone, which
 is not proof either. **none**: no Khaos mark was found, which never proves a person made the audio. Files longer
-than 20 minutes are not decoded. Authorities, researchers and the press can ask the Register for a verify key,
-which lifts the per-address limit (`--key` or `KHAOS_VERIFY_KEY`).
+than 20 minutes are not decoded. Authorities, researchers and the press can ask for a verify key at
+foundation@khaos.dev; it lifts the per-address limit (`--key` or `KHAOS_VERIFY_KEY`).
 
 ## Provenance record fields
 
