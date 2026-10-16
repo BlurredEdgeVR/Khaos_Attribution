@@ -170,8 +170,8 @@ def resolve_device(requested: str = "auto") -> str:
 
 
 def measure_precision(requested: str, device_type: str) -> str:
-    """The trainer's rule for a feature: bf16 on MPS whatever was asked (fp16 overflows there), else as asked."""
-    return PRECISION if device_type == "mps" else requested
+    """The trainer's rule for a feature: fp16 becomes bf16 on MPS (no gradient scaling there), else as asked."""
+    return PRECISION if device_type == "mps" and requested in {"fp16", "16-mixed"} else requested
 
 
 def preprocess_precision(device_type: str) -> str:

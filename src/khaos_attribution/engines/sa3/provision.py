@@ -22,6 +22,7 @@ TORCHAUDIO = "torchaudio==2.7.1"
 TORCH_INDEX = "https://download.pytorch.org/whl/cu128"
 FLASH_ATTN = "flash-attn==2.8.3"
 PYTHON_VERSION = "3.11"
+COMPLETE_MARK = ".khaos-complete"
 
 
 @dataclass
@@ -105,6 +106,8 @@ def environment(root: Path, runtime: str, *, check_only: bool = False) -> tuple:
     if not python.is_file():
         _run([uv, "venv", "-q", "--python", PYTHON_VERSION, root / ".venv"])
     export = _run([uv, "export", "--frozen", "--no-hashes", "--extra", "lora", "--no-emit-project", "--no-dev"], cwd=root)
+    if export.returncode != 0 or not export.stdout.strip():
+        return False, f"Stability's lock could not be exported: {export.stderr.strip()[-300:]}"
     locked = "\n".join(l for l in export.stdout.splitlines()
                        if not (l.startswith(("torch==", "torchaudio==", "triton==", "nvidia-", "#", "-e")) or not l.strip()))
     (work / "stability-locked.txt").write_text(locked + "\n")
@@ -120,7 +123,12 @@ def environment(root: Path, runtime: str, *, check_only: bool = False) -> tuple:
         if done.returncode != 0:
             return False, f"environment step failed ({' '.join(str(c) for c in cmd[:4])}…): {done.stderr.strip()[-300:]}"
     ok, note = contract_into(python)
-    return ok, "the engine's environment installed" + ("" if ok else f"; {note}")
+    if not ok:
+        return False, f"the engine's environment installed; {note}"
+    probe = _run([python, "-c", "import torch, stable_audio_3, flash_attn; assert torch.cuda.is_available(); print('ok')"])
+    if probe.returncode != 0:
+        return False, f"the environment installed but cannot run the engine: {probe.stderr.strip()[-200:]}"
+    return True, "the engine's environment installed; torch sees the GPU, Flash Attention and stable_audio_3 import"
 
 
 CONTRACT_SRC_ENV = "KHAOS_CONTRACT_SRC"
@@ -140,6 +148,19 @@ def contract_into(python: Path) -> tuple:
     return True, f"khaos-attribution {__version__} in the engine's environment"
 
 
+def weights_complete(target: Path) -> bool:
+    """A weight folder counts only when whole: its sentinel, or real files outside the downloader's cache with
+    no partial download left behind."""
+    if not target.is_dir():
+        return False
+    if (target / COMPLETE_MARK).is_file():
+        return True
+    cache = target / ".cache"
+    if any(cache.rglob("*.incomplete")):
+        return False
+    return any(f.is_file() and cache not in f.parents for f in target.rglob("*"))
+
+
 def weights(root: Path, runtime: str, weights_dir: Path, *, check_only: bool = False) -> list:
     """Every weight set the descriptor lists, under weights_dir, by the engine's own downloader; the gated text
     encoder downloads only once the user's Hugging Face login has been approved."""
@@ -147,7 +168,7 @@ def weights(root: Path, runtime: str, weights_dir: Path, *, check_only: bool = F
     out = []
     for w in DESCRIPTOR.weights:
         target = weights_dir / w["name"]
-        have = target.is_dir() and any(target.iterdir())
+        have = weights_complete(target)
         if have:
             out.append((True, f"{w['repo']} present at {target}"))
             continue
@@ -163,6 +184,7 @@ def weights(root: Path, runtime: str, weights_dir: Path, *, check_only: bool = F
                     + ("; request access on its page, wait for approval, then `hf auth login`" if w.get("gated") else ""))
             out.append((False, note))
         else:
+            (target / COMPLETE_MARK).write_text(f"{w['repo']}\n", encoding="utf-8")
             out.append((True, f"{w['repo']} downloaded to {target}"))
     if runtime == "mlx":
         npz = weights_dir / BASE_NPZ
@@ -184,6 +206,9 @@ def provision(repo_dir=None, weights_dir=None, *, device: str = "auto", check_on
     runtime = runtime_for(device)
     weights_dir = Path(weights_dir) if weights_dir else root / "checkpoints"
     report = Report()
+    if os.name == "nt":
+        report.bad(f"{DESCRIPTOR.name} is not provisioned on Windows yet: its environment and workers are POSIX")
+        return report
     ok, note = checkout(root, check_only=check_only)
     (report.ok if ok else report.bad)(note)
     if ok:

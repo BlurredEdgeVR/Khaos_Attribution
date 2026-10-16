@@ -178,3 +178,84 @@ def test_clips_are_written_from_khaos_dataset_json_and_lyrics_never_travel(tmp_p
         assert fh.getframerate() == 44100 and fh.getnchannels() == 2
     assert (tmp_path / "out" / "t_seg_000.txt").read_text() == "bright\n"
     assert T.pair_files(tmp_path / "out") == [tmp_path / "out" / "t_seg_000.wav"]
+
+
+SLOW_TRAINER = '''
+import csv, sys, time
+from pathlib import Path
+args = sys.argv[1:]
+save_dir = Path(args[args.index("--save_dir") + 1]); save_dir.mkdir(parents=True, exist_ok=True)
+steps = int(args[args.index("--steps") + 1]); every = int(args[args.index("--checkpoint_every") + 1])
+Path("trainer_pid").write_text(str(__import__("os").getpid()))
+with (save_dir / "khaos_losses.csv").open("w", newline="") as fh:
+    w = csv.DictWriter(fh, fieldnames=["step", "loss"]); w.writeheader(); fh.flush()
+    for s in range(steps):
+        if (s + 1) % every == 0:
+            # The checkpoint lands before its loss row, in pieces.
+            ck = save_dir / f"epoch=0-step={s + 1}.ckpt"
+            ck.write_bytes(b"half"); time.sleep(0.3); ck.write_bytes(b"whole")
+        w.writerow({"step": s + 1, "loss": f"{1.0 / (s + 1):.4f}"}); fh.flush()
+        time.sleep(0.4)
+time.sleep(30)
+'''
+
+
+def test_a_checkpoint_is_laid_out_only_once_whole_and_after_its_loss_row(api, tmp_path, monkeypatch):
+    """A half-written checkpoint waits; its name carries its own step's loss, never the row before."""
+    monkeypatch.setattr(T, "POLL_SECONDS", 0.2)
+    T.TRAIN_DRIVER.write_text(SLOW_TRAINER)
+    tensors = tmp_path / "run" / "tensors"
+    _clips(tensors, 2)
+    session = T.open_session(api, {**RECIPE, "max_epochs": 2}, checkpoint_root=tmp_path, tensor_dir=tensors,
+                             output_dir=tmp_path / "run", device="cuda", precision="bf16", seed=1)
+    seen = []
+    for update in session.train():
+        seen.append(update)
+        if update.kind == "checkpoint" and update.epoch == 2:
+            break
+    checkpoints = [u for u in seen if u.kind == "checkpoint"]
+    assert [u.epoch for u in checkpoints] == [1, 2]
+    assert checkpoints[0].loss == pytest.approx(0.5, abs=1e-3), "epoch 1 closes at step 2, whose loss is 0.5"
+    laid = sorted((tmp_path / "run" / "checkpoints").glob("epoch_*/adapter_model.safetensors"))
+    assert all(f.read_bytes() == b"converted:whole" for f in laid)
+    # The consumer stopped reading: the trainer is gone, not orphaned.
+    assert session.process.poll() is not None
+
+
+def test_a_stopped_consumer_stops_the_trainer(api, tmp_path, monkeypatch):
+    monkeypatch.setattr(T, "POLL_SECONDS", 0.1)
+    T.TRAIN_DRIVER.write_text(SLOW_TRAINER)
+    tensors = tmp_path / "run" / "tensors"
+    _clips(tensors, 2)
+    session = T.open_session(api, RECIPE, checkpoint_root=tmp_path, tensor_dir=tensors, output_dir=tmp_path / "run",
+                             device="cuda", precision="bf16", seed=1)
+    gen = session.train()
+    assert next(gen).kind == "info"
+    gen.close()
+    assert session.process.poll() is not None
+
+
+def test_save_final_refuses_an_older_epoch_and_resume_sets_the_earlier_run_aside(api, tmp_path):
+    tensors = tmp_path / "run" / "tensors"
+    _clips(tensors, 2)
+    recipe = {**RECIPE, "max_epochs": 4, "checkpoint_every_n_epochs": 3}
+    session = T.open_session(api, recipe, checkpoint_root=tmp_path, tensor_dir=tensors, output_dir=tmp_path / "run",
+                             device="cuda", precision="bf16", seed=1)
+    updates = list(session.train())
+    assert [u.epoch for u in updates if u.kind == "checkpoint"] == [3] and updates[-1].kind == "complete"
+    with pytest.raises(RuntimeError, match="epoch 3 of 4"):
+        session.save_final(tmp_path / "final")
+    # Resumed from epoch 2: the old logs move aside, the trainer runs the epochs left, epochs count on from 2.
+    resumed = T.open_session(api, {**recipe, "checkpoint_every_n_epochs": 1}, checkpoint_root=tmp_path, tensor_dir=tensors,
+                             output_dir=tmp_path / "run", device="cuda", precision="bf16", seed=1, resume_from=session.latest_adapter)
+    resumed.install_hooks(start_epoch=2)
+    assert resumed.run_steps()["total"] == 4 and "--lora_checkpoint" in resumed.command()
+    updates = list(resumed.train())
+    assert [u.epoch for u in updates if u.kind == "epoch"] == [3, 4]
+    assert [u.epoch for u in updates if u.kind == "checkpoint"] == [3, 4]
+    assert list((tmp_path / "run" / "sa3").glob("before_resume_*/khaos_losses.csv"))
+    assert resumed.save_final(tmp_path / "final").is_file()
+
+
+def test_steps_round_up_so_a_short_last_batch_counts():
+    assert T.steps_for({"max_epochs": 2, "batch_size": 4}, 5)["per_epoch"] == 2

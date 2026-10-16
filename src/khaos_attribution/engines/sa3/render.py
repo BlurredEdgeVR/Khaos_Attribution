@@ -149,13 +149,17 @@ def run_worker(root: Path, runtime: str, request: dict, *, should_stop=None, tim
     python = python_for(root, runtime)
     env = {**os.environ, "PYTHONPATH": str(root), "HF_HUB_OFFLINE": os.environ.get("HF_HUB_OFFLINE", "1"),
            "WANDB_MODE": "disabled"}
-    proc = subprocess.Popen([str(python), str(WORKER)], cwd=str(root), env=env, stdin=subprocess.PIPE,
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        # Its own session, so a stop reaches the MLX render the worker spawns, not only the worker.
+        proc = subprocess.Popen([str(python), str(WORKER)], cwd=str(root), env=env, stdin=subprocess.PIPE,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, errors="replace",
+                                start_new_session=True)
+    except OSError as exc:
+        raise RenderFailed(f"the Stable Audio 3 worker could not start: {exc}") from exc
     try:
         stdout, stderr = _communicate(proc, json.dumps(request), should_stop, timeout)
-    except RenderCancelled:
-        proc.kill()
-        proc.wait()
+    except (RenderCancelled, RenderFailed):
+        stop_tree(proc)
         raise
     last = (stdout or "").strip().splitlines()[-1:] or [""]
     try:
@@ -164,16 +168,38 @@ def run_worker(root: Path, runtime: str, request: dict, *, should_stop=None, tim
         reply = None
     if isinstance(reply, dict) and reply.get("error"):
         raise RenderFailed(str(reply["error"]))
-    if proc.returncode != 0 or not isinstance(reply, dict):
+    if proc.returncode != 0 or not isinstance(reply, dict) or "seed" not in reply:
         tail = "\n".join((stderr or "").strip().splitlines()[-8:]) or (stdout or "")[-300:]
         raise RenderFailed(f"the Stable Audio 3 worker failed ({proc.returncode}): {tail}")
     return reply
 
 
+def stop_tree(proc) -> None:
+    """The worker and whatever it spawned: asked first, killed after a short grace, always reaped."""
+    import signal  # noqa: PLC0415
+    import time  # noqa: PLC0415
+    if proc.poll() is not None:
+        return
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            os.killpg(proc.pid, sig)
+        except (ProcessLookupError, PermissionError, OSError):
+            proc.kill()
+        deadline = time.monotonic() + 3.0
+        while proc.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.1)
+        if proc.poll() is not None:
+            break
+    proc.wait()
+
+
 def _communicate(proc, stdin: str, should_stop, timeout):
     """stdin written, then polled: a stop between polls cancels the render."""
-    proc.stdin.write(stdin)
-    proc.stdin.close()
+    try:
+        proc.stdin.write(stdin)
+        proc.stdin.close()
+    except (BrokenPipeError, OSError):
+        pass   # the worker died before reading; its exit code and stderr say why
     proc.stdin = None   # communicate() would flush it again
     import time  # noqa: PLC0415
     deadline = time.monotonic() + timeout if timeout else None
@@ -185,7 +211,6 @@ def _communicate(proc, stdin: str, should_stop, timeout):
             if should_stop is not None and should_stop():
                 raise RenderCancelled()
             if deadline is not None and time.monotonic() > deadline:
-                proc.kill()
                 raise RenderFailed("the Stable Audio 3 worker ran past its time limit")
 
 

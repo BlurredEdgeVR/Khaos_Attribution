@@ -79,6 +79,9 @@ def main(argv=None) -> int:
         return 2
     print(f"==> {d.name}: the licence")
     print(statement(a.engine))
+    if not Path(a.marker_dir).is_dir():
+        print(f"[FAIL] the marker directory {a.marker_dir} does not exist", file=sys.stderr)
+        return 1
     if accepted(a.marker_dir, a.engine):
         print(f"[ok] accepted earlier ({marker_path(a.marker_dir, a.engine)})")
     elif a.check:
@@ -101,7 +104,11 @@ def main(argv=None) -> int:
     if slot is None:
         print(f"[ok] {d.name} needs no provisioning of its own here")
         return 0
-    report = slot.provision(a.repo_dir, a.weights_dir, device=a.device, check_only=a.check)
+    try:
+        report = slot.provision(a.repo_dir, a.weights_dir, device=a.device, check_only=a.check)
+    except (OSError, RuntimeError) as exc:
+        print(f"[FAIL] {d.name} could not be provisioned: {exc}", file=sys.stderr)
+        return 1
     print(report.text())
     return 0 if report.passed else 1
 

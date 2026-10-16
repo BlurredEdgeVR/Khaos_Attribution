@@ -91,8 +91,11 @@ def _env(handle: Handle) -> dict:
 
 def _ask(handle: Handle, request: dict) -> dict:
     from khaos_attribution.gradient import GradientUnavailable  # noqa: PLC0415
-    done = subprocess.run([str(handle.python), str(MEASURE_WORKER)], input=json.dumps(request), cwd=str(handle.root),
-                          capture_output=True, text=True, env=_env(handle))
+    try:
+        done = subprocess.run([str(handle.python), str(MEASURE_WORKER)], input=json.dumps(request), cwd=str(handle.root),
+                              capture_output=True, text=True, errors="replace", env=_env(handle))
+    except OSError as exc:
+        raise GradientUnavailable(f"the Stable Audio 3 measure worker could not start: {exc}") from exc
     last = (done.stdout or "").strip().splitlines()[-1:] or [""]
     try:
         reply = json.loads(last[0])
@@ -101,7 +104,14 @@ def _ask(handle: Handle, request: dict) -> dict:
     if not isinstance(reply, dict) or reply.get("error") or done.returncode != 0:
         why = (reply or {}).get("error") if isinstance(reply, dict) else "\n".join((done.stderr or "").splitlines()[-6:])
         raise GradientUnavailable(f"the Stable Audio 3 measure worker failed: {why}")
+    missing = [k for k in _REPLY_KEYS.get(request.get("command"), ()) if k not in reply]
+    if missing:
+        raise GradientUnavailable(f"the Stable Audio 3 measure worker's reply lacks {', '.join(missing)}")
     return reply
+
+
+_REPLY_KEYS = {"parameters": ("n_params", "n_tensors", "signature"), "index": ("rows", "matrix"), "feature": ("feature",),
+               "loss": ("with", "without")}
 
 
 def _base(handle: Handle, index_meta: dict, files, command: str) -> dict:
@@ -125,7 +135,11 @@ def index_rows(handle: Handle, files, *, projection, timesteps, noise_seed: int,
     out = Path(files[0]).resolve().parent / ".khaos_index_rows.tmp.npy" if files else Path(".khaos_index_rows.tmp.npy")
     r = _ask(handle, {**_base(handle, {"timesteps": timesteps, "noise_seed": noise_seed, "target": target}, files, "index"),
                       "projection": {"dim": int(projection.dim), "seed": int(projection.seed)}, "out": str(out)})
-    matrix = np.load(str(r["matrix"]))
+    from khaos_attribution.gradient import GradientUnavailable  # noqa: PLC0415
+    try:
+        matrix = np.load(str(r["matrix"]))
+    except (OSError, ValueError) as exc:
+        raise GradientUnavailable(f"the Stable Audio 3 measure worker left no readable matrix: {exc}") from exc
     Path(r["matrix"]).unlink(missing_ok=True)
     if on_row is not None:
         for row in r["rows"]:

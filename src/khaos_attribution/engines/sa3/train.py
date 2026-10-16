@@ -20,7 +20,7 @@ from typing import Any
 
 from khaos_attribution.engines.render import RenderFailed
 from khaos_attribution.engines.sa3 import DESCRIPTOR
-from khaos_attribution.engines.sa3.render import MLX_SUBDIR, find_root, python_for, runtime_for
+from khaos_attribution.engines.sa3.render import MLX_SUBDIR, find_root, python_for, runtime_for, stop_tree
 from khaos_attribution.engines.train import TrainingUnavailable, TrainingUpdate
 from khaos_attribution.identifiers import track_of_segment
 
@@ -37,6 +37,7 @@ HELDOUT_WORKER = Path(__file__).with_name("heldout_worker.py")
 CONVERT_WORKER = Path(__file__).with_name("convert_worker.py")
 TRAIN_DRIVER = Path(__file__).with_name("train_driver.py")
 LOSSES_CSV = "khaos_losses.csv"
+POLL_SECONDS = 2.0
 
 __all__ = ["LossHooks", "Session", "TrainingApi", "TrainingUnavailable", "adapter_file_in", "adapter_kwargs",
            "open_module", "open_session", "pair_files", "preprocess_pairs", "training_api"]
@@ -192,7 +193,8 @@ def steps_for(cfg: dict, n_pairs: int) -> dict:
     """Khaos's epochs as Stability's steps: steps per epoch at the recipe's batch size, the total, and the
     checkpoint cadence in steps."""
     batch = max(1, int(cfg.get("batch_size") or 1))
-    per_epoch = max(1, n_pairs // batch)
+    # The trainer keeps a short last batch, so an epoch is the batches it runs, not the full ones.
+    per_epoch = max(1, -(-n_pairs // batch))
     epochs = int(cfg["max_epochs"])
     every_epochs = max(1, int(cfg.get("checkpoint_every_n_epochs") or 1))
     return {"per_epoch": per_epoch, "total": per_epoch * epochs, "checkpoint_every": per_epoch * every_epochs,
@@ -300,16 +302,25 @@ class Session:
         self.steps = steps_for(cfg, len(pair_files(self.tensor_dir)))
         self.window_seconds = float(cfg.get("window_sec") or 0.0) or longest_clip_seconds(self.tensor_dir)
         self.latest_adapter: Path | None = None
+        self.latest_epoch = 0
+        self.start_epoch = 0
+        self._sizes: dict = {}
         self.module = None
         self.training_config = None
         self.process: subprocess.Popen | None = None
 
     def install_hooks(self, *, start_epoch: int = 0, stem_ids=(), record_into: dict | None = None) -> LossHooks:
+        self.start_epoch = max(0, int(start_epoch or 0))
         return LossHooks(record_into=record_into)
+
+    def run_steps(self) -> dict:
+        """The steps this process runs: the epochs left after a resume, at the planned cadence."""
+        left = max(1, self.steps["epochs"] - getattr(self, "start_epoch", 0))
+        return {**self.steps, "epochs": left, "total": self.steps["per_epoch"] * left}
 
     def command(self) -> list:
         return trainer_command(self.api, self.cfg, tensor_dir=self.tensor_dir, save_dir=self.save_dir,
-                               checkpoint_root=self.checkpoint_root, steps=self.steps, seed=self.seed,
+                               checkpoint_root=self.checkpoint_root, steps=self.run_steps(), seed=self.seed,
                                window_seconds=self.window_seconds, resume_from=self.resume_from)
 
     def _losses(self) -> list:
@@ -317,17 +328,46 @@ class Session:
             return losses_from_telemetry(self.save_dir / TELEMETRY)
         return losses_from_metrics_csv(self.save_dir)
 
+    def _set_aside_earlier_run(self) -> None:
+        """A resumed run's logs and checkpoints move out of the way, or the old rows would replay as new epochs."""
+        aside = self.save_dir / f"before_resume_{time.strftime('%Y%m%d_%H%M%S')}"
+        moved = False
+        for f in [self.save_dir / LOSSES_CSV, self.save_dir / TELEMETRY,
+                  *self.save_dir.rglob("*.ckpt"), *self.save_dir.rglob("*.safetensors")]:
+            if f.is_file() and aside not in f.parents:
+                aside.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(f), str(aside / f.name))
+                moved = True
+        if not moved and aside.is_dir():
+            aside.rmdir()
+
     def _checkpoints(self) -> dict:
         found = {}
         for f in [*self.save_dir.rglob("*.ckpt"), *self.save_dir.rglob("*.safetensors")]:
+            if any(part.startswith("before_resume_") for part in f.relative_to(self.save_dir).parts):
+                continue
             step = checkpoint_step(f)
             if step:
                 found[step] = f
         return found
 
+    def _settled(self, path: Path, final: bool) -> bool:
+        """A checkpoint is read only once its size and mtime held still across two polls (or the trainer has
+        exited): the trainer writes it in one long, non-atomic write."""
+        try:
+            st = path.stat()
+        except OSError:
+            return False
+        seen = self._sizes.get(path)
+        self._sizes[path] = (st.st_size, st.st_mtime_ns)
+        return final or seen == (st.st_size, st.st_mtime_ns)
+
+    def _epoch_of(self, step: int) -> int:
+        return getattr(self, "start_epoch", 0) + max(1, round(step / self.steps["per_epoch"]))
+
     def _lay_out(self, step: int, source: Path, loss: float) -> Path:
         """The checkpoint in the Workshop's layout, converted to safetensors when the trainer wrote a .ckpt."""
-        epoch = max(1, round(step / self.steps["per_epoch"]))
+        epoch = self._epoch_of(step)
         target_dir = self.output_dir / "checkpoints" / f"epoch_{epoch}_loss_{loss:.4f}"
         target_dir.mkdir(parents=True, exist_ok=True)
         target = target_dir / DESCRIPTOR.adapter["filenames"][0]
@@ -340,56 +380,74 @@ class Session:
         else:
             shutil.copy2(source, target)
         self.latest_adapter = target
+        self.latest_epoch = epoch
         return target_dir
 
     def train(self):
         """The trainer's run as Khaos's updates: info at start, an epoch each time the step count crosses one
         (its loss the mean of the epoch's steps), a checkpoint each time one lands, complete or fail at the end."""
         self.save_dir.mkdir(parents=True, exist_ok=True)
+        if self.resume_from is not None:
+            self._set_aside_earlier_run()
+        self._sizes = {}
+        offset = getattr(self, "start_epoch", 0)
         cmd = self.command()
-        (self.save_dir / "train_command.json").write_text(json.dumps({"command": cmd, "steps": self.steps,
+        (self.save_dir / "train_command.json").write_text(json.dumps({"command": cmd, "steps": self.run_steps(),
                                                                       "window_seconds": self.window_seconds}, indent=1) + "\n")
         log_file = (self.save_dir / "trainer_stdout.log").open("ab")
+        # Its own session, so a stop reaches the trainer's data workers too.
         self.process = subprocess.Popen(cmd, cwd=str(self.save_dir), env=_env(self.api), stdout=log_file,
-                                        stderr=subprocess.STDOUT)
+                                        stderr=subprocess.STDOUT, start_new_session=True)
+        try:
+            yield from self._follow(offset)
+        finally:
+            # Whatever ends the loop (a consumer that stops reading, a conversion that fails), no trainer is left running.
+            stop_tree(self.process)
+            log_file.close()
+
+    def _follow(self, offset: int):
         yield TrainingUpdate(step=0, loss=0.0, msg=f"[OK] Stable Audio 3 trainer started ({self.api.runtime})",
-                             kind="info", epoch=0)
+                             kind="info", epoch=offset)
         seen_steps = 0
-        epoch_done = 0
+        epoch_done = offset
         laid_out: set = set()
         epoch_losses: list = []
+        losses_by_step: dict = {}
         last_loss = 0.0
         start = time.monotonic()
+        per_epoch = self.steps["per_epoch"]
         while True:
             alive = self.process.poll() is None
             losses = self._losses()
             events: list = []
             for step, loss in losses[seen_steps:]:
                 last_loss = loss
+                losses_by_step[step] = loss
                 epoch_losses.append(loss)
-                if step % self.steps["per_epoch"] == 0:
-                    epoch_done = step // self.steps["per_epoch"]
+                if step % per_epoch == 0:
+                    epoch_done = offset + step // per_epoch
                     mean = sum(epoch_losses) / len(epoch_losses)
                     epoch_losses = []
                     events.append((step, 0, TrainingUpdate(step=step, loss=mean, msg=f"[OK] Epoch {epoch_done}", kind="epoch",
                                                            epoch=epoch_done, epoch_time=time.monotonic() - start)))
                     start = time.monotonic()
             seen_steps = len(losses)
+            highest = max(losses_by_step) if losses_by_step else 0
             for step, path in sorted(self._checkpoints().items()):
-                if step in laid_out:
+                # Laid out once complete and once its own loss row is in: the name carries that loss.
+                if step in laid_out or not self._settled(path, final=not alive) or (alive and highest < step):
                     continue
                 laid_out.add(step)
-                target_dir = self._lay_out(step, path, last_loss)
-                events.append((step, 1, TrainingUpdate(step=step, loss=last_loss, msg="[OK] Checkpoint", kind="checkpoint",
-                                                       epoch=max(1, round(step / self.steps["per_epoch"])),
-                                                       checkpoint_path=str(target_dir))))
+                loss_at = losses_by_step.get(step, last_loss)
+                target_dir = self._lay_out(step, path, loss_at)
+                events.append((step, 1, TrainingUpdate(step=step, loss=loss_at, msg="[OK] Checkpoint", kind="checkpoint",
+                                                       epoch=self._epoch_of(step), checkpoint_path=str(target_dir))))
             # In step order, a checkpoint after the epoch it closes: what the trainer's own stream would say.
             for _step, _order, update in sorted(events, key=lambda e: (e[0], e[1])):
                 yield update
             if not alive:
                 break
-            time.sleep(2.0)
-        log_file.close()
+            time.sleep(POLL_SECONDS)
         code = self.process.returncode
         if code != 0:
             tail = "\n".join((self.save_dir / "trainer_stdout.log").read_text(errors="ignore").splitlines()[-8:])
@@ -403,9 +461,13 @@ class Session:
         return HeldoutEvaluator(self, Path(tensor_val_dir), n_buckets=int(n_buckets))
 
     def save_final(self, final_dir: Path | str) -> Path:
-        """The last checkpoint, as the adapter the run exports."""
+        """The last epoch's checkpoint, as the adapter the run exports; an older one is refused so the room's
+        salvage path records what it really took."""
         if self.latest_adapter is None or not self.latest_adapter.is_file():
             raise RuntimeError("Stable Audio 3 wrote no checkpoint to export")
+        if getattr(self, "latest_epoch", 0) < self.steps["epochs"]:
+            raise RuntimeError(f"the last checkpoint is epoch {self.latest_epoch} of {self.steps['epochs']}; "
+                               "the final weights were not written")
         final_dir = Path(final_dir)
         final_dir.mkdir(parents=True, exist_ok=True)
         target = final_dir / DESCRIPTOR.adapter["filenames"][0]
