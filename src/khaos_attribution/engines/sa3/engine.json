@@ -119,5 +119,16 @@
     "adapter_rank": 16,
     "adapter_alpha": 16,
     "adapter_type": "lora"
+  },
+  "memory": {
+    "resident_gb": 0.0,
+    "yielded_gb": 0.0,
+    "scorer": {
+      "base_gb": 8.7,
+      "gb_per_sec": 0.0,
+      "checkpointed_gb": 8.7,
+      "checkpointed_gb_per_sec": 0.0,
+      "process_gb": 0.5
+    }
   }
 }

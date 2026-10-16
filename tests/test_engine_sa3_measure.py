@@ -80,4 +80,7 @@ def test_a_workers_refusal_is_the_sockets(handle, tmp_path):
     handle.adapter.write_bytes(b"w")
     with pytest.raises(GradientUnavailable, match="cannot be switched off"):
         M.paired_loss(handle, {"timesteps": [0.5], "noise_seed": 1}, [tmp_path / "x.wav"])
-    assert M.memory_plan("cuda", 30.0)["fits"] is None, "the Space still refuses: the engine measures nowhere until its records pass"
+    assert M.memory_plan("cuda", 30.0, total_gb=96.0, env={})["fits"] == "resident"
+    assert M.memory_plan("cuda", 30.0, total_gb=8.0, env={})["fits"] is None
+    assert "CUDA only" in M.memory_plan("mps", 30.0, total_gb=96.0, env={})["refusal"]
+    assert M.scorer_need_gb(300) == M.scorer_need_gb(5) == 9.2, "one measured number, not fitted by length"

@@ -15,12 +15,37 @@ __all__ = ["Handle", "LOW_MEMORY_OVERRIDE_ENV", "NOT_BUILT", "SYSTEM_RESERVE_GB"
            "index_rows", "memory_plan", "output_feature", "output_loss", "paired_loss", "parameter_count", "scorer_need_gb"]
 
 
+_SCORER = DESCRIPTOR.memory.get("scorer") or {}
+# Measured once on khaos on a 56 s clip (the longest the Workshop cuts): the worker's whole-model fp32 peak. Not fitted
+# by length; a longer clip would need another measurement.
+SCORER_BASE_GB = float(_SCORER.get("base_gb") or 0.0)
+SCORER_PROCESS_GB = float(_SCORER.get("process_gb") or 0.0)
+
+
 def scorer_need_gb(duration_sec: float, *, checkpointed: bool = False) -> float:
-    raise NotImplementedError(NOT_BUILT)
+    """What the feature worker needs on the device for any clip up to the longest the Workshop cuts."""
+    if not SCORER_BASE_GB:
+        raise NotImplementedError(NOT_BUILT)
+    return SCORER_BASE_GB + SCORER_PROCESS_GB
 
 
 def memory_plan(device_type: str, duration_sec: float, *, total_gb: float | None = None, env: dict | None = None) -> dict:
-    return {"fits": None, "checkpointed": False, "need_gb": None, "total_gb": total_gb, "refusal": NOT_BUILT}
+    """The worker runs in its own process on the device, so the plan is one number against the device's memory;
+    nothing is checkpointed and nothing of the engine is resident to yield."""
+    import os as _os  # noqa: PLC0415
+    from khaos_attribution.engines.acestep.measure import machine_memory_gb  # noqa: PLC0415
+    if not SCORER_BASE_GB:
+        return {"fits": None, "checkpointed": False, "need_gb": None, "total_gb": total_gb, "refusal": NOT_BUILT}
+    if device_type != "cuda":
+        return {"fits": None, "checkpointed": False, "need_gb": None, "total_gb": total_gb,
+                "refusal": f"{DESCRIPTOR.name}'s features are taken on CUDA only; this machine scores on {device_type}"}
+    total = machine_memory_gb(device_type) if total_gb is None else total_gb
+    need = scorer_need_gb(duration_sec)
+    plan = {"fits": "resident", "checkpointed": False, "need_gb": round(need, 1), "total_gb": total, "refusal": None}
+    if total is None or need + SYSTEM_RESERVE_GB <= total or (env if env is not None else _os.environ).get(LOW_MEMORY_OVERRIDE_ENV) == "1":
+        return plan
+    return {**plan, "fits": None, "refusal": (f"measuring an output on {DESCRIPTOR.name} needs about {need + SYSTEM_RESERVE_GB:.0f} GB on the "
+                                              f"device, and this one has {total:.0f} GB")}
 
 
 def enable_checkpointing(module: Any) -> int:
