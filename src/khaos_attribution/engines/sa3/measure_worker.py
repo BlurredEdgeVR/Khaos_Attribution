@@ -164,9 +164,10 @@ def run(req: dict) -> dict:
         return {"feature": np.mean(np.stack(vectors), axis=0).astype(float).tolist(), "n": len(vectors)}
     if command == "loss":
         # A weight-decomposed adapter at strength 0 is still not the base model: the reading is refused, never faked.
-        from stable_audio_3.models.lora.utils import detect_dora_variant, load_lora_checkpoint  # noqa: PLC0415
+        from stable_audio_3.models.lora.utils import load_lora_checkpoint  # noqa: PLC0415
         state, _cfg = load_lora_checkpoint(str(req["adapter"]))
-        if detect_dora_variant(state):
+        # Any magnitude tensor means weight decomposition, whatever its axis (Stability's detector gives up on 1-D ones).
+        if any(str(k).endswith(".magnitude") for k in state):
             raise RuntimeError("a weight-decomposed adapter cannot be switched off for a measurement")
         clips = [_clip(model, torch, wav, device, G.pair_noise_seed(noise_seed, wav.name)) for wav in files]
         wrapped.set_lora_strength(1.0)
