@@ -37,8 +37,8 @@ SIGNED_STATES = ("Valid", "Trusted")
 TSA_PROBE_S = 2.0
 TSA_RETRY_S = 600.0
 # Record fields that travel inside the file; the prompt and anything about a listener never do.
-RECORD_FIELDS = ("artist_id", "artist_name", "adapter_version", "adapter_hash", "base_model", "base_model_licence",
-                 "generation_id", "watermark_id", "register_serial", "timestamp")
+RECORD_FIELDS = ("artist_id", "artist_name", "adapter_version", "adapter_hash", "base_model", "base_model_id",
+                 "base_model_licence", "engine_commit", "generation_id", "watermark_id", "register_serial", "timestamp")
 
 
 class CredentialsUnavailable(RuntimeError):

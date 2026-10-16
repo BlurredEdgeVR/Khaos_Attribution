@@ -190,6 +190,11 @@
     "resemblance": {
       "type": "object",
       "description": "On a dtrak document: the CLAP resemblance reading kept beside influence, with how far the two splits agree. Resemblance is not influence."
+    },
+    "base_model_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9.-]*@[a-z0-9][a-z0-9._-]*$",
+      "description": "The base model the measured index belongs to, <engine>@<variant>."
     }
   },
   "required": [

@@ -79,6 +79,18 @@
       ],
       "description": "Generation ID of the source output this one was derived from (retake/repaint/extend/audio2audio). Null for fresh generations.",
       "default": null
+    },
+    "base_model_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9.-]*@[a-z0-9][a-z0-9._-]*$",
+      "description": "The base model as an identifier, <engine>@<variant>, beside the human name in base_model."
+    },
+    "engine_commit": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The engine code's commit or weights revision that trained (card) or rendered (record) this; null when not a checkout."
     }
   },
   "required": [

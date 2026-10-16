@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+
+from khaos_attribution.base_model import is_base_model_id
 import os
 import base64
 import secrets
@@ -162,6 +164,8 @@ def record_problems(record: dict) -> list:
     for k in ("base_model_commit", "workshop_commit", "engine_commit", "trained_at_utc", "card_schema_version"):
         if k in model and model[k] is not None and not isinstance(model[k], str):
             out.append(f"model.{k} must be a string or null")
+    if "base_model_id" in model and model["base_model_id"] is not None and not is_base_model_id(model["base_model_id"]):
+        out.append("model.base_model_id must be <engine>@<variant>")
     consent = record["consent"]
     if not _is_sha256(consent.get("statement_sha256")):
         out.append("consent.statement_sha256 must be a sha256 hex digest")

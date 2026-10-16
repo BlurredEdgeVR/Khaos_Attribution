@@ -491,7 +491,8 @@ def create_app(cfg: dict | None = None) -> FastAPI:
         note = ("What the artist's Workshop attested, bound to hashes the artist's own machine can reproduce. The register cannot "
                 "see the audio and does not verify the claim; it makes it checkable.")
         body = P.hero(f"Register No. {serial}", r["artist_name"], note, facts, P.seal_for(serial, rec["signed"]["record"]))
-        kv = [("Base model", f"{P.esc(m['base_model'])} <span class=\"muted\">· {P.esc(m['base_model_licence'])} licence</span>"),
+        engine_id = f" <span class=\"mono\">{P.esc(m['base_model_id'])}</span>" if m.get("base_model_id") else ""
+        kv = [("Base model", f"{P.esc(m['base_model'])}{engine_id} <span class=\"muted\">· {P.esc(m['base_model_licence'])} licence</span>"),
               ("Adapter", f'<span class="mono">{P.esc(m["adapter_sha256"])}</span>'),
               ("Model card", f'<span class="mono">{P.esc(m["card_sha256"])}</span>'),
               ("Dataset hash", f'<span class="mono">{P.esc(r["provenance"]["dataset_hash"])}</span>'),
