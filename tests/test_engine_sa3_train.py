@@ -77,7 +77,8 @@ def test_epochs_become_steps_at_the_pair_count():
     assert s == {"per_epoch": 316, "total": 2528, "checkpoint_every": 632, "epochs": 8}
     assert T.steps_for({"max_epochs": 1, "batch_size": 4}, 3)["per_epoch"] == 1, "never zero steps an epoch"
     kind, a = T.adapter_kwargs(RECIPE)
-    assert kind == "dora-rows" and a == {"rank": 16, "alpha": 16, "dropout": 0.0}
+    assert kind == "lora" and a == {"rank": 16, "alpha": 16, "dropout": 0.0}, "a LoKR recipe maps to the engine's own adapter type"
+    assert T.adapter_kwargs({**RECIPE, "adapter_type": "dora-rows"})[0] == "dora-rows", "Stability's other types pass through"
 
 
 def test_the_trainer_is_driven_as_a_process_and_its_run_becomes_khaos_updates(api, tmp_path):
@@ -87,7 +88,7 @@ def test_the_trainer_is_driven_as_a_process_and_its_run_becomes_khaos_updates(ap
                              output_dir=tmp_path / "run", device="cuda", precision="bf16", seed=4)
     assert session.steps == {"per_epoch": 3, "total": 6, "checkpoint_every": 3, "epochs": 2}
     cmd = session.command()
-    assert "--data_dir" in cmd and cmd[cmd.index("--adapter_type") + 1] == "dora-rows" and "--duration" in cmd
+    assert "--data_dir" in cmd and cmd[cmd.index("--adapter_type") + 1] == "lora" and "--duration" in cmd
     assert cmd[1].endswith("driver.py")
     updates = list(session.train())
     kinds = [u.kind for u in updates]

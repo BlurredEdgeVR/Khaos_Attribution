@@ -319,9 +319,12 @@
     "train": {
       "type": "object",
       "additionalProperties": {
-        "type": "number"
+        "type": [
+          "number",
+          "string"
+        ]
       },
-      "description": "The engine's own training defaults, applied over a Khaos recipe when a run names this engine: learning_rate, adapter_rank, adapter_alpha and any other number its trainer takes."
+      "description": "The engine's own training defaults, applied over a Khaos recipe when a run names this engine: learning_rate, adapter_rank, adapter_alpha, adapter_type and any other value its trainer takes."
     }
   }
 }
