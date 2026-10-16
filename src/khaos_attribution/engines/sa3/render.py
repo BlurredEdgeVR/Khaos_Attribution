@@ -37,8 +37,17 @@ def runtime_for(device: str) -> str:
     return "torch"
 
 
+PYTHON_ENV = {"torch": "SA3_PYTHON", "mlx": "SA3_MLX_PYTHON"}
+
+
 def python_for(root: Path, runtime: str) -> Path:
-    """The engine's own interpreter for a runtime; RenderFailed when the engine was never provisioned here."""
+    """The engine's own interpreter for a runtime: SA3_PYTHON / SA3_MLX_PYTHON when set (an environment made
+    elsewhere, such as the trial's), else the one provisioning makes; RenderFailed when neither is there."""
+    env = os.environ.get(PYTHON_ENV[runtime], "").strip()
+    if env:
+        if not Path(env).is_file():
+            raise RenderFailed(f"{PYTHON_ENV[runtime]} names no interpreter at {env}")
+        return Path(env)
     venv = (root / MLX_SUBDIR if runtime == "mlx" else root) / ".venv" / "bin" / "python"
     if not venv.is_file():
         raise RenderFailed(f"Stable Audio 3 is not provisioned at {root} for {runtime}: no interpreter at {venv}")

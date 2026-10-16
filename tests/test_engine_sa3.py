@@ -82,7 +82,8 @@ def test_refusals_are_the_sockets(fake_engine, tmp_path):
         r.load("turbo")
 
 
-def test_an_unprovisioned_checkout_is_refused_with_the_path(tmp_path):
+def test_an_unprovisioned_checkout_is_refused_with_the_path(tmp_path, monkeypatch):
+    monkeypatch.delenv("SA3_PYTHON", raising=False)
     r = R.Renderer(repo_dir=tmp_path / "nowhere", device="cpu")
     with pytest.raises(RenderFailed, match="not found"):
         r.load()
@@ -90,3 +91,9 @@ def test_an_unprovisioned_checkout_is_refused_with_the_path(tmp_path):
     with pytest.raises(RenderFailed, match="not provisioned"):
         R.Renderer(repo_dir=tmp_path / "here", device="cuda").load()
     assert R.runtime_for("cuda") == "torch" and R.runtime_for("mps") == "mlx"
+    monkeypatch.setenv("SA3_PYTHON", str(tmp_path / "elsewhere" / "python"))
+    with pytest.raises(RenderFailed, match="SA3_PYTHON names no interpreter"):
+        R.python_for(tmp_path / "here", "torch")
+    (tmp_path / "elsewhere").mkdir()
+    (tmp_path / "elsewhere" / "python").write_text("")
+    assert R.python_for(tmp_path / "here", "torch") == tmp_path / "elsewhere" / "python"
