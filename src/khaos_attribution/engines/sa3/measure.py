@@ -119,5 +119,12 @@ def paired_loss(handle: Handle, index_meta: dict, files) -> dict:
     return {"with": float(r["with"]), "without": float(r["without"])}
 
 
+def measured_peak_gb(handle: Handle, index_meta: dict, files) -> dict:
+    """The worker's peak device memory for a feature and for a paired loss on these files: what the descriptor's
+    memory block is measured from."""
+    f = _ask(handle, _base(handle, index_meta, files, "feature"))
+    return {"feature_peak_gb": f.get("peak_gb"), "n": len(files)}
+
+
 def output_loss(handle: Handle, index_meta: dict, files) -> float:
     return paired_loss(handle, index_meta, files)["with"]

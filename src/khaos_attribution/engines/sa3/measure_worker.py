@@ -109,10 +109,22 @@ def _loss(model, torch, clip, timesteps) -> float:
     return total / float(len(timesteps))
 
 
+def _peak_gb() -> float | None:
+    """The worker's peak device memory, so the room can plan for it."""
+    try:
+        import torch  # noqa: PLC0415
+        if torch.cuda.is_available():
+            return round(torch.cuda.max_memory_allocated() / 1024 ** 3, 2)
+    except Exception:  # noqa: BLE001
+        return None
+    return None
+
+
 def main() -> int:
     req = json.loads(sys.stdin.read())
     try:
         reply = run(req)
+        reply["peak_gb"] = _peak_gb()
     except Exception as exc:  # noqa: BLE001 — the reply carries it
         reply = {"error": f"{type(exc).__name__}: {exc}"}
     sys.stdout.write("\n" + json.dumps(reply) + "\n")
