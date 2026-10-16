@@ -50,7 +50,11 @@ def _clip(model, torch, wav: Path, device, pair_seed: int):
         with torch.autocast(device_type=device if isinstance(device, str) else device.type, enabled=str(device).startswith("cuda")):
             latents = model.pretransform.encode(x)
     latents = latents.float().detach()
-    cond = model.conditioner([{"prompt": caption, "seconds_total": n / sr}], device)
+    # The conditioning is taken once and detached: the feature is the DiT adapter's gradient, and a conditioner
+    # graph reused across timesteps would be walked twice.
+    with torch.no_grad():
+        cond = model.conditioner([{"prompt": caption, "seconds_total": n / sr}], device)
+    cond = _detached(cond, torch)
     cond["inpaint_mask"] = [torch.zeros(1, 1, latents.shape[-1], dtype=torch.bool, device=latents.device)]
     cond["inpaint_masked_input"] = [torch.zeros_like(latents)]
     valid = max(1, min(int(round(n / ratio)), latents.shape[-1]))
@@ -59,6 +63,16 @@ def _clip(model, torch, wav: Path, device, pair_seed: int):
     gen = torch.Generator(device="cpu").manual_seed(int(pair_seed))
     noise = torch.randn(latents.shape, generator=gen, dtype=torch.float32).to(latents.device)
     return latents, cond, mask, noise
+
+
+def _detached(value, torch):
+    if isinstance(value, dict):
+        return {k: _detached(v, torch) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return type(value)(_detached(v, torch) for v in value)
+    if hasattr(value, "detach"):
+        return value.detach()
+    return value
 
 
 def _forward(model, torch, latents, cond, mask, noise, t: float):
