@@ -1,0 +1,274 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Khaos engine descriptor",
+  "description": "What a base-model engine is and what it can do, as data: read by both rooms, pinned by the Engine Room.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "id",
+    "name",
+    "version",
+    "licence",
+    "weights",
+    "platforms",
+    "conditioning",
+    "sings",
+    "sample_rate",
+    "variants",
+    "default_variant",
+    "bounds",
+    "rework_modes",
+    "adapter",
+    "measure"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9.-]*$",
+      "description": "The engine half of base_model_id."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "code": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "repo": {
+          "type": "string"
+        },
+        "commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "commit_note": {
+          "type": "string"
+        }
+      }
+    },
+    "licence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "notice": {
+          "type": "string"
+        },
+        "obligations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "weights": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "repo"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "repo": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "string"
+          },
+          "components": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "gated": {
+            "type": "boolean"
+          },
+          "gated_by": {
+            "type": "string"
+          },
+          "size_gb": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    "platforms": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "enum": [
+            "train",
+            "render",
+            "measure"
+          ]
+        }
+      }
+    },
+    "conditioning": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tempo": {
+          "type": "boolean"
+        },
+        "key": {
+          "type": "boolean"
+        },
+        "time_signature": {
+          "type": "boolean"
+        },
+        "lyrics": {
+          "type": "boolean"
+        },
+        "vocal_language": {
+          "type": "boolean"
+        },
+        "trigger": {
+          "type": "boolean"
+        },
+        "duration": {
+          "type": "boolean"
+        }
+      }
+    },
+    "sings": {
+      "type": "boolean"
+    },
+    "sample_rate": {
+      "type": "integer",
+      "minimum": 8000
+    },
+    "vocal_languages": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "default_vocal_language": {
+      "type": "string"
+    },
+    "variants": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "render"
+        ],
+        "properties": {
+          "config": {
+            "type": "string"
+          },
+          "render": {
+            "type": "object",
+            "additionalProperties": {
+              "type": [
+                "number",
+                "boolean"
+              ]
+            }
+          },
+          "step_clamp": {
+            "type": "integer"
+          },
+          "note": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "default_variant": {
+      "type": "string"
+    },
+    "render_setting_keys": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "bounds": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "number"
+        },
+        "minItems": 2,
+        "maxItems": 2
+      }
+    },
+    "rework_modes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "adapter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "filenames"
+      ],
+      "properties": {
+        "type": {
+          "type": "string"
+        },
+        "filenames": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "resumable": {
+          "type": "boolean"
+        }
+      }
+    },
+    "latent_fps": {
+      "type": "number"
+    },
+    "measure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "feature_version"
+      ],
+      "properties": {
+        "feature_version": {
+          "type": "string"
+        },
+        "timestep_convention": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,153 @@
+{
+  "schema_version": "1",
+  "id": "acestep-1.5",
+  "name": "ACE-Step 1.5",
+  "version": "1.5",
+  "code": {
+    "repo": "https://github.com/ace-step/ACE-Step-1.5",
+    "commit": "ca1e85fe9430179831e6bc6be790c332190a3866",
+    "commit_note": "ace-step/ACE-Step-1.5 at the commit titled \"fix(jetson): remove GPL video codecs, fix ffmpeg/example\": DCW defaults resolved from the model config, DCW off for non-turbo, a repaint chunk-mask fix, cover-only params kept to their task, and skip-LM as the default"
+  },
+  "licence": {
+    "name": "MIT",
+    "notice": "The ACE-Step copyright notice travels with any copy of the engine's code.",
+    "obligations": [
+      "the copyright notice and the licence text travel with any copy of the code"
+    ]
+  },
+  "weights": [
+    {
+      "name": "engine",
+      "repo": "ACE-Step/Ace-Step1.5",
+      "required": true,
+      "gated": false,
+      "components": [
+        "acestep-v15-turbo",
+        "vae",
+        "Qwen3-Embedding-0.6B",
+        "acestep-5Hz-lm-1.7B"
+      ]
+    },
+    {
+      "name": "base",
+      "repo": "ACE-Step/acestep-v15-base",
+      "required": false,
+      "gated": false,
+      "size_gb": 4.5,
+      "components": [
+        "acestep-v15-base"
+      ]
+    }
+  ],
+  "platforms": {
+    "cuda": [
+      "train",
+      "render",
+      "measure"
+    ],
+    "mps": [
+      "train",
+      "render",
+      "measure"
+    ],
+    "cpu": [
+      "render"
+    ]
+  },
+  "conditioning": {
+    "tempo": true,
+    "key": true,
+    "time_signature": true,
+    "lyrics": true,
+    "vocal_language": true,
+    "trigger": true,
+    "duration": true
+  },
+  "sings": true,
+  "sample_rate": 48000,
+  "vocal_languages": {
+    "en": "English",
+    "es": "Spanish",
+    "fr": "French",
+    "de": "German",
+    "it": "Italian",
+    "pt": "Portuguese",
+    "ja": "Japanese",
+    "ko": "Korean",
+    "zh": "Chinese"
+  },
+  "default_vocal_language": "en",
+  "variants": {
+    "turbo": {
+      "config": "acestep-v15-turbo",
+      "step_clamp": 8,
+      "render": {
+        "steps": 8,
+        "shift": 3.0,
+        "guidance_scale": 7.0,
+        "cfg_interval_start": 0.0,
+        "cfg_interval_end": 1.0,
+        "dcw_enabled": true
+      },
+      "note": "the serving weights: the engine's service path clamps steps to 8 and forces guidance 1.0"
+    },
+    "base": {
+      "config": "acestep-v15-base",
+      "render": {
+        "steps": 32,
+        "shift": 3.0,
+        "guidance_scale": 7.0,
+        "cfg_interval_start": 0.0,
+        "cfg_interval_end": 1.0,
+        "dcw_enabled": false
+      },
+      "note": "the undistilled weights: CFG over an interval, DCW off, a separate download"
+    }
+  },
+  "default_variant": "turbo",
+  "render_setting_keys": [
+    "steps",
+    "shift",
+    "guidance_scale",
+    "cfg_interval_start",
+    "cfg_interval_end",
+    "dcw_enabled"
+  ],
+  "bounds": {
+    "duration_seconds": [
+      5,
+      600
+    ],
+    "steps": [
+      1,
+      200
+    ],
+    "bpm": [
+      30,
+      300
+    ],
+    "takes": [
+      1,
+      16
+    ]
+  },
+  "rework_modes": [
+    "retake",
+    "repaint",
+    "extend",
+    "audio2audio"
+  ],
+  "adapter": {
+    "type": "lokr",
+    "filenames": [
+      "adapter_model.safetensors",
+      "lokr_weights.safetensors"
+    ],
+    "resumable": true
+  },
+  "latent_fps": 25,
+  "measure": {
+    "feature_version": "vnorm/1",
+    "timestep_convention": "t->1 is noise; flow-matching velocity x1-x0"
+  }
+}

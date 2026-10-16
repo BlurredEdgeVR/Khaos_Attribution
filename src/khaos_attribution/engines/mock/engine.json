@@ -1,0 +1,110 @@
+{
+  "schema_version": "1",
+  "id": "mock",
+  "name": "mock-engine 1.0",
+  "version": "1.0",
+  "code": {
+    "repo": "khaos_attribution.engines.mock"
+  },
+  "licence": {
+    "name": "MIT"
+  },
+  "weights": [],
+  "platforms": {
+    "cuda": [
+      "train",
+      "render",
+      "measure"
+    ],
+    "mps": [
+      "train",
+      "render",
+      "measure"
+    ],
+    "cpu": [
+      "train",
+      "render",
+      "measure"
+    ]
+  },
+  "conditioning": {
+    "tempo": true,
+    "key": true,
+    "time_signature": true,
+    "lyrics": true,
+    "vocal_language": true,
+    "trigger": true,
+    "duration": true
+  },
+  "sings": true,
+  "sample_rate": 48000,
+  "vocal_languages": {
+    "en": "English",
+    "es": "Spanish",
+    "fr": "French",
+    "de": "German",
+    "it": "Italian",
+    "pt": "Portuguese",
+    "ja": "Japanese",
+    "ko": "Korean",
+    "zh": "Chinese"
+  },
+  "default_vocal_language": "en",
+  "variants": {
+    "turbo": {
+      "config": "mock-turbo",
+      "render": {
+        "steps": 8,
+        "shift": 3.0,
+        "guidance_scale": 7.0,
+        "cfg_interval_start": 0.0,
+        "cfg_interval_end": 1.0,
+        "dcw_enabled": true
+      }
+    }
+  },
+  "default_variant": "turbo",
+  "render_setting_keys": [
+    "steps",
+    "shift",
+    "guidance_scale",
+    "cfg_interval_start",
+    "cfg_interval_end",
+    "dcw_enabled"
+  ],
+  "bounds": {
+    "duration_seconds": [
+      5,
+      600
+    ],
+    "steps": [
+      1,
+      200
+    ],
+    "bpm": [
+      30,
+      300
+    ],
+    "takes": [
+      1,
+      16
+    ]
+  },
+  "rework_modes": [
+    "retake",
+    "repaint",
+    "extend",
+    "audio2audio"
+  ],
+  "adapter": {
+    "type": "mock",
+    "filenames": [
+      "adapter_model.safetensors"
+    ],
+    "resumable": true
+  },
+  "latent_fps": 25,
+  "measure": {
+    "feature_version": "mock/1"
+  }
+}
