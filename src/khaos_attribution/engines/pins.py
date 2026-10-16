@@ -18,14 +18,22 @@ def git_env() -> dict:
     return {k: v for k, v in os.environ.items() if k not in GIT_REPO_ENV_OVERRIDES}
 
 
+COMMIT_FILE = ".khaos-commit"
+
+
 def checkout_commit(root) -> str | None:
-    """The 40-character HEAD of the checkout at *root*, or None (not a checkout, no git, a slow git, no full SHA)."""
+    """The 40-character HEAD of the checkout at *root*, or None (not a checkout, no git, a slow git, no full SHA).
+    A checkout unpacked from an archive carries its commit in .khaos-commit instead of a .git."""
     if root is None:
         return None
     root = str(root)
     try:
         if not (Path(root) / ".git").exists():
-            return None
+            try:
+                sha = (Path(root) / COMMIT_FILE).read_text(encoding="utf-8").strip()
+            except OSError:
+                return None
+            return sha if _SHA_RE.match(sha) else None
     except OSError:
         return None
     try:

@@ -247,7 +247,8 @@ def test_save_final_refuses_an_older_epoch_and_resume_sets_the_earlier_run_aside
         session.save_final(tmp_path / "final")
     # Resumed from epoch 2: the old logs move aside, the trainer runs the epochs left, epochs count on from 2.
     resumed = T.open_session(api, {**recipe, "checkpoint_every_n_epochs": 1}, checkpoint_root=tmp_path, tensor_dir=tensors,
-                             output_dir=tmp_path / "run", device="cuda", precision="bf16", seed=1, resume_from=session.latest_adapter)
+                             output_dir=tmp_path / "run", device="cuda", precision="bf16", seed=1, resume_from=session.latest_adapter.parent)
+    assert resumed.resume_from == session.latest_adapter, "a checkpoint folder resolves to its adapter file"
     resumed.install_hooks(start_epoch=2)
     assert resumed.run_steps()["total"] == 4 and "--lora_checkpoint" in resumed.command()
     mlx = T.Session(T.TrainingApi(root=api.root, runtime="mlx", python=sys.executable), recipe, checkpoint_root=tmp_path,

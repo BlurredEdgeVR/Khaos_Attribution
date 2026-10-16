@@ -113,6 +113,21 @@
           },
           "size_gb": {
             "type": "number"
+          },
+          "runtime": {
+            "type": "string",
+            "enum": [
+              "torch",
+              "mlx"
+            ],
+            "description": "only this runtime needs the set"
+          },
+          "patterns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "only these paths of the repo are fetched"
           }
         }
       }

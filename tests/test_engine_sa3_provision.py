@@ -21,6 +21,7 @@ def test_check_reports_a_missing_checkout_and_changes_nothing(tmp_path, monkeypa
 
 
 def test_check_compares_the_pin_and_the_environment_and_each_weight(tmp_path, monkeypatch):
+    """Torch weights count only in the Hugging Face cache, the one place Stability's package reads them from."""
     root = tmp_path / "sa3"
     (root / ".git").mkdir(parents=True)
     pin = P.DESCRIPTOR.commit
@@ -35,17 +36,71 @@ def test_check_compares_the_pin_and_the_environment_and_each_weight(tmp_path, mo
     monkeypatch.setattr(P, "_run", fake_run)
     (root / ".venv" / "bin").mkdir(parents=True)
     (root / ".venv" / "bin" / "python").write_text("")
-    weights = tmp_path / "w"
-    (weights / "stable-audio-3-medium-base").mkdir(parents=True)
-    (weights / "stable-audio-3-medium-base" / "model.safetensors").write_bytes(b"w")
-    report = P.provision(root, weights, device="cuda", check_only=True)
+    have = {"stabilityai/stable-audio-3-medium-base"}
+    monkeypatch.setattr(P, "cached", lambda repo, files: repo in have)
+    report = P.provision(root, tmp_path / "w", device="cuda", check_only=True)
     text = report.text()
     assert "at the pin" in text and "Flash Attention" in text
-    assert "google/t5gemma-b-b-ul2 missing" in text and "stable-audio-3-medium missing" in text and "(optional)" in text
+    assert "stabilityai/stable-audio-3-medium missing" in text and "google" not in text, "the encoder the config names is Stability's copy"
+    assert "stable-audio-3-optimized" not in text, "the MLX port's set is not the torch runtime's"
     assert not report.passed, "the gated text encoder is required and absent"
-    (weights / "t5gemma-b-b-ul2").mkdir()
-    (weights / "t5gemma-b-b-ul2" / "config.json").write_text("{}")
-    assert P.provision(root, weights, device="cuda", check_only=True).passed
+    have.add("stabilityai/stable-audio-3-medium")
+    assert P.provision(root, tmp_path / "w", device="cuda", check_only=True).passed
+
+
+def test_an_install_fills_the_cache_through_the_engines_own_downloader(tmp_path, monkeypatch):
+    root = tmp_path / "sa3"
+    (root / ".git").mkdir(parents=True)
+    (root / ".venv" / "bin").mkdir(parents=True)
+    (root / ".venv" / "bin" / "python").write_text("")
+    calls = []
+
+    def fake_run(cmd, cwd=None, env=None):
+        cmd = [str(c) for c in cmd]
+        calls.append((cmd, env))
+        if "rev-parse" in cmd:
+            return _done(out=P.DESCRIPTOR.commit + "\n")
+        if "-c" in cmd and "import torch" in cmd[-1]:
+            return _done(0, "ok")
+        if "snapshot_download" in " ".join(cmd):
+            return _done(1, err="401 Client Error: gated") if cmd[-2].endswith("stable-audio-3-medium") else _done()
+        return _done()
+    monkeypatch.setattr(P, "_run", fake_run)
+    monkeypatch.setattr(P, "cached", lambda repo, files: "medium-base" in repo and any("medium-base" in " ".join(c) for c, _ in calls))
+    report = P.provision(root, tmp_path / "w", device="cuda")
+    text = report.text()
+    downloads = [c for c, _ in calls if "snapshot_download" in " ".join(c)]
+    assert [c[-2] for c in downloads] == ["stabilityai/stable-audio-3-medium-base", "stabilityai/stable-audio-3-medium"]
+    assert downloads[1][-1] == '["t5gemma-b-b-ul2/*"]', "only the encoder is fetched from the distilled model's repository"
+    assert all(env.get("HF_HUB_OFFLINE") == "0" and "PYTHONPATH" not in env for c, env in calls if "snapshot_download" in " ".join(c))
+    assert "hf auth login" in text and not report.passed
+
+
+def test_without_git_the_code_comes_from_the_archive_at_the_pin(tmp_path, monkeypatch):
+    import io
+    import tarfile
+    from khaos_attribution.engines.pins import checkout_commit
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+        data = b"print('sa3')\n"
+        info = tarfile.TarInfo("stable-audio-3-abc/setup.py"); info.size = len(data)
+        tar.addfile(info, io.BytesIO(data))
+        info = tarfile.TarInfo("stable-audio-3-abc/stable_audio_3/__init__.py"); info.size = 0
+        tar.addfile(info, io.BytesIO(b""))
+    seen = {}
+
+    class _Resp(io.BytesIO):
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+    monkeypatch.setattr(P, "git_usable", lambda: False)
+    import urllib.request
+    monkeypatch.setattr(urllib.request, "urlopen", lambda url, timeout=0: seen.setdefault("url", url) and _Resp(buf.getvalue()))
+    root = tmp_path / "sa3"
+    ok, note = P.checkout(root)
+    assert ok and "unpacked at the pin" in note and (root / "setup.py").read_text() == "print('sa3')\n"
+    assert seen["url"] == f"https://github.com/Stability-AI/stable-audio-3/archive/{P.DESCRIPTOR.commit}.tar.gz"
+    assert checkout_commit(root) == P.DESCRIPTOR.commit, "the pin is readable without a .git"
+    assert P.checkout(root, check_only=True)[0]
 
 
 def test_a_moved_pin_is_named_not_moved_under_check(tmp_path, monkeypatch):
@@ -65,12 +120,49 @@ def test_the_mlx_runtime_wants_the_exported_base_weights(tmp_path, monkeypatch):
     pin = P.DESCRIPTOR.commit
     monkeypatch.setattr(P, "_run", lambda cmd, cwd=None, env=None: _done(out=pin + "\n") if "rev-parse" in [str(c) for c in cmd] else _done(0, "ok"))
     weights = tmp_path / "w"
-    for name in ("stable-audio-3-medium-base", "stable-audio-3-medium", "t5gemma-b-b-ul2"):
-        (weights / name).mkdir(parents=True)
-        (weights / name / "x").write_bytes(b"w")
+    monkeypatch.setattr(P, "cached", lambda repo, files: True)
+    mlx = root / "optimized" / "mlx"
     report = P.provision(root, weights, device="mps", check_only=True)
-    assert "MLX base weights missing" in report.text() and not report.passed
-    (weights / P.BASE_NPZ).write_bytes(b"npz")
-    assert P.provision(root, weights, device="mps", check_only=True).passed
+    text = report.text()
+    assert "stable-audio-3-optimized missing" in text and "MLX base weights missing" in text and not report.passed
+    assert "t5gemma" not in text, "the MLX port carries its own text encoder"
+    for rel in ("models/mlx/dit_medium-base_f16.npz", "models/mlx/dit_medium_f16.npz", "models/mlx/same_l_decoder_f32.npz",
+                "models/mlx/same_l_encoder_f32.npz", "models/mlx/t5gemma_f16.npz"):
+        (mlx / rel).parent.mkdir(parents=True, exist_ok=True)
+        (mlx / rel).write_bytes(b"npz")
+    assert not P.installed(root, "mlx", weights)
+    # An install links the port's ready-made base file where the trainer looks; no model repository is pulled on MLX.
+    report = P.provision(root, weights, device="mps")
+    assert report.passed and (weights / P.BASE_NPZ).resolve() == (mlx / "models/mlx/dit_medium-base_f16.npz").resolve()
+    assert P.installed(root, "mlx", weights) and P.provision(root, weights, device="mps", check_only=True).passed
+    (mlx / "models/mlx/t5gemma_f16.npz").unlink()
+    (mlx / "models/mlx/t5gemma_f16.npz").symlink_to(tmp_path / "gone")
+    assert "optimized missing" in P.provision(root, weights, device="mps", check_only=True).text(), "a dangling link is missing"
     with pytest.raises(SystemExit):
         P.main(["--help"])
+
+
+def test_an_unpacked_checkout_moves_to_a_new_pin_and_keeps_its_environments(tmp_path, monkeypatch):
+    root = tmp_path / "sa3"
+    (root / ".venv" / "bin").mkdir(parents=True)
+    (root / ".venv" / "bin" / "python").write_text("")
+    (root / "optimized" / "mlx" / "models" / "mlx").mkdir(parents=True)
+    (root / "optimized" / "mlx" / "models" / "mlx" / "t5gemma_f16.npz").write_bytes(b"npz")
+    (root / ".khaos-commit").write_text("0" * 40 + "\n")
+    monkeypatch.setattr(P, "git_usable", lambda: False)
+    unpacked = {}
+    def fake_unpack(url, where, commit):
+        unpacked["url"] = url
+        P.unpack_archive.__wrapped__(where, commit) if False else None
+        # the real mover, with the archive replaced by one file
+        part = where.with_name(where.name + ".part"); part.mkdir(); (part / "setup.py").write_text("")
+        (part / ".khaos-commit").write_text(commit + "\n")
+        for rel in P.KEPT_ACROSS_PINS:
+            if (where / rel).exists():
+                (part / rel).parent.mkdir(parents=True, exist_ok=True); (where / rel).rename(part / rel)
+        import shutil; shutil.rmtree(where); part.replace(where)
+    monkeypatch.setattr(P, "unpack_archive", fake_unpack)
+    assert not P.checkout(root, check_only=True)[0]
+    ok, note = P.checkout(root)
+    assert ok and "moved to the pin" in note and P.DESCRIPTOR.commit in unpacked["url"]
+    assert (root / ".venv" / "bin" / "python").is_file() and (root / "optimized/mlx/models/mlx/t5gemma_f16.npz").is_file()

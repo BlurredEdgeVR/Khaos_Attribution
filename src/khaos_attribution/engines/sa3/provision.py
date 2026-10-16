@@ -5,6 +5,7 @@ Hugging Face token: the gated text encoder downloads only after the user's own `
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -22,7 +23,6 @@ TORCHAUDIO = "torchaudio==2.7.1"
 TORCH_INDEX = "https://download.pytorch.org/whl/cu128"
 FLASH_ATTN = "flash-attn==2.8.3"
 PYTHON_VERSION = "3.11"
-COMPLETE_MARK = ".khaos-complete"
 
 
 @dataclass
@@ -52,24 +52,90 @@ def uv_path() -> str:
 
 
 def _run(cmd: list, cwd: Path | None = None, env: dict | None = None) -> subprocess.CompletedProcess:
+    # The engine's interpreters never see the room's PYTHONPATH: its packages are not theirs.
+    env = {k: v for k, v in (env if env is not None else os.environ).items() if k != "PYTHONPATH"}
     return subprocess.run([str(c) for c in cmd], cwd=str(cwd) if cwd else None, env=env, capture_output=True, text=True)
+
+
+def git_usable() -> bool:
+    """Whether git here runs without a dialog: a Mac without the developer tools has a git stub that opens one."""
+    if not shutil.which("git"):
+        return False
+    if sys.platform == "darwin":
+        return _run(["xcode-select", "-p"]).returncode == 0
+    return True
+
+
+def archive_url(repo: str, commit: str) -> str:
+    base = repo[:-4] if repo.endswith(".git") else repo
+    return f"{base}/archive/{commit}.tar.gz"
+
+
+# What an unpacked checkout keeps when it moves to a new pin: its environments and the weights beside them.
+KEPT_ACROSS_PINS = (".venv", "checkpoints", f"{MLX_SUBDIR}/.venv", f"{MLX_SUBDIR}/models/mlx")
+
+
+def unpack_archive(url: str, root: Path, commit: str) -> None:
+    """Stability's code at the commit from its archive, when git is not usable here: the top folder stripped,
+    the commit recorded in .khaos-commit so the pin can still be read; an earlier unpack's environments and
+    weights carried across."""
+    import io  # noqa: PLC0415
+    import tarfile  # noqa: PLC0415
+    import urllib.request  # noqa: PLC0415
+    from khaos_attribution.engines.pins import COMMIT_FILE  # noqa: PLC0415
+    with urllib.request.urlopen(url, timeout=120) as resp:  # noqa: S310 — the descriptor's own code repository
+        data = resp.read()
+    part = root.with_name(root.name + ".part")
+    shutil.rmtree(part, ignore_errors=True)
+    part.mkdir(parents=True)
+    with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
+        members = [m for m in tar.getmembers() if "/" in m.name]
+        for m in members:
+            m.name = m.name.split("/", 1)[1]
+        tar.extractall(part, members=members, filter="data")
+    (part / COMMIT_FILE).write_text(commit + "\n", encoding="utf-8")
+    for rel in KEPT_ACROSS_PINS:
+        if (root / rel).exists():
+            (part / rel).parent.mkdir(parents=True, exist_ok=True)
+            shutil.rmtree(part / rel, ignore_errors=True)
+            shutil.move(str(root / rel), str(part / rel))
+    old = root.with_name(root.name + ".old")
+    shutil.rmtree(old, ignore_errors=True)
+    if root.exists():
+        root.replace(old)
+    part.replace(root)
+    shutil.rmtree(old, ignore_errors=True)
 
 
 def checkout(root: Path, *, check_only: bool = False) -> tuple:
     """Stability's code at the descriptor's commit; (ok, note)."""
+    from khaos_attribution.engines.pins import checkout_commit  # noqa: PLC0415
     repo, commit = DESCRIPTOR.doc["code"]["repo"], DESCRIPTOR.commit
-    if not (root / ".git").is_dir():
+    if not (root / ".git").is_dir() and checkout_commit(root) is None:
         if check_only:
             return False, f"Stable Audio 3 code not cloned at {root}"
         root.parent.mkdir(parents=True, exist_ok=True)
-        done = _run(["git", "clone", "-q", repo, root])
-        if done.returncode != 0:
-            return False, f"clone failed: {done.stderr.strip()[-300:]}"
-    head = _run(["git", "-C", root, "rev-parse", "HEAD"]).stdout.strip()
+        if git_usable():
+            done = _run(["git", "clone", "-q", repo, root])
+            if done.returncode != 0:
+                return False, f"clone failed: {done.stderr.strip()[-300:]}"
+        else:
+            try:
+                unpack_archive(archive_url(repo, commit), root, commit)
+            except (OSError, ValueError) as exc:
+                return False, f"the code archive could not be fetched: {exc}"
+            return True, f"Stable Audio 3 code unpacked at the pin {commit[:12]}"
+    head = _run(["git", "-C", root, "rev-parse", "HEAD"]).stdout.strip() if (root / ".git").is_dir() else (checkout_commit(root) or "")
     if head == commit:
         return True, f"Stable Audio 3 code at the pin {commit[:12]}"
     if check_only:
-        return False, f"Stable Audio 3 code at {head[:12]}, pin is {commit[:12]}"
+        return False, f"Stable Audio 3 code at {head[:12] or 'an unknown commit'}, pin is {commit[:12]}"
+    if not (root / ".git").is_dir():
+        try:
+            unpack_archive(archive_url(repo, commit), root, commit)
+        except (OSError, ValueError) as exc:
+            return False, f"the code archive could not be fetched: {exc}"
+        return True, f"Stable Audio 3 code moved to the pin {commit[:12]}"
     _run(["git", "-C", root, "fetch", "-q", "origin", commit])
     done = _run(["git", "-C", root, "checkout", "-q", "--detach", commit])
     return (done.returncode == 0), (f"checked out {commit[:12]}" if done.returncode == 0 else f"checkout failed: {done.stderr.strip()[-300:]}")
@@ -148,57 +214,96 @@ def contract_into(python: Path) -> tuple:
     return True, f"khaos-attribution {__version__} in the engine's environment"
 
 
-def weights_complete(target: Path) -> bool:
-    """A weight folder counts only when whole: its sentinel, or real files outside the downloader's cache with
-    no partial download left behind."""
-    if not target.is_dir():
+def cached(repo: str, filenames: list) -> bool:
+    """Whether the Hugging Face cache holds every named file of the repo: the only place Stability's torch
+    package reads weights from."""
+    try:
+        from huggingface_hub import try_to_load_from_cache  # noqa: PLC0415
+    except ImportError:
         return False
-    if (target / COMPLETE_MARK).is_file():
-        return True
-    cache = target / ".cache"
-    if any(cache.rglob("*.incomplete")):
-        return False
-    return any(f.is_file() and cache not in f.parents for f in target.rglob("*"))
+    for name in filenames:
+        found = try_to_load_from_cache(repo, name)
+        if not isinstance(found, str):
+            return False
+    return True
+
+
+def mlx_base_link(root: Path, weights_dir: Path) -> Path:
+    """Where the MLX trainer's base weights are expected, a link to the port's ready-made file."""
+    return weights_dir / BASE_NPZ
 
 
 def weights(root: Path, runtime: str, weights_dir: Path, *, check_only: bool = False) -> list:
-    """Every weight set the descriptor lists, under weights_dir, by the engine's own downloader; the gated text
-    encoder downloads only once the user's Hugging Face login has been approved."""
+    """Every weight set the descriptor lists for this runtime: torch sets into the Hugging Face cache by the
+    engine's own downloader (a gated set only once the user's own login has been approved); the MLX port's set
+    through its own weights module, its ready-made base file linked where the trainer looks."""
     python = (root / MLX_SUBDIR if runtime == "mlx" else root) / ".venv" / "bin" / "python"
     out = []
     for w in DESCRIPTOR.weights:
-        target = weights_dir / w["name"]
-        have = weights_complete(target)
-        if have:
-            out.append((True, f"{w['repo']} present at {target}"))
+        if w.get("runtime") and w["runtime"] != runtime:
             continue
-        if check_only or not w.get("required", True):
-            out.append((not w.get("required", True), f"{w['repo']} missing at {target}" + ("" if w.get("required", True) else " (optional)")))
+        required = w.get("required", True)
+        if w.get("runtime") == "mlx":
+            mlx = root / MLX_SUBDIR
+            parts = [mlx / c for c in (w.get("components") or [])]
+            for f in parts:
+                # A link left pointing at a cache that is gone would make the port skip the fetch.
+                if f.is_symlink() and not f.exists():
+                    f.unlink()
+            if all(f.exists() for f in parts):
+                out.append((True, f"{w['repo']} present under {mlx}"))
+                continue
+            if check_only:
+                out.append((not required, f"{w['repo']} missing under {mlx}"))
+                continue
+            code = ("import sys; sys.path.insert(0, 'scripts'); from weights import ensure_local; "
+                    "[ensure_local(p, verbose=False) for p in sys.argv[1:]]")
+            done = _run([python, "-c", code, *(w.get("components") or [])], cwd=mlx, env={**os.environ, "HF_HUB_OFFLINE": "0"})
+            whole = done.returncode == 0 and all(f.exists() for f in parts)
+            out.append((whole, f"{w['repo']} fetched by the MLX port" if whole
+                        else f"{w['repo']} could not be fetched: {done.stderr.strip()[-200:] or 'a file is still missing'}"))
             continue
-        code = (f"import sys; from huggingface_hub import snapshot_download; "
-                f"snapshot_download({w['repo']!r}, local_dir=sys.argv[1])")
-        done = _run([python, "-c", code, target], env={**os.environ, "HF_HUB_OFFLINE": "0"})
-        if done.returncode != 0:
-            why = done.stderr.strip().splitlines()[-1:] or ["download failed"]
+        files = list(w.get("components") or ["config.json"])
+        if cached(w["repo"], files):
+            out.append((True, f"{w['repo']} in the Hugging Face cache"))
+            continue
+        if check_only or not required:
+            out.append((not required, f"{w['repo']} missing from the Hugging Face cache" + ("" if required else " (optional)")))
+            continue
+        code = ("import json, sys; from huggingface_hub import snapshot_download; "
+                "snapshot_download(sys.argv[1], allow_patterns=json.loads(sys.argv[2]) or None)")
+        done = _run([python, "-c", code, w["repo"], json.dumps(w.get("patterns") or [])], env={**os.environ, "HF_HUB_OFFLINE": "0"})
+        if done.returncode != 0 or not cached(w["repo"], files):
+            why = done.stderr.strip().splitlines()[-1:] or ["a file is still missing"]
             note = (f"{w['repo']} could not be downloaded: {why[0][:200]}"
-                    + ("; request access on its page, wait for approval, then `hf auth login`" if w.get("gated") else ""))
+                    + ("; accept its terms on its Hugging Face page, then `hf auth login`" if w.get("gated") else ""))
             out.append((False, note))
         else:
-            (target / COMPLETE_MARK).write_text(f"{w['repo']}\n", encoding="utf-8")
-            out.append((True, f"{w['repo']} downloaded to {target}"))
+            out.append((True, f"{w['repo']} downloaded to the Hugging Face cache"))
     if runtime == "mlx":
-        npz = weights_dir / BASE_NPZ
-        base = weights_dir / "stable-audio-3-medium-base"
-        if npz.is_file():
-            out.append((True, f"MLX base weights at {npz}"))
-        elif check_only or not base.is_dir():
-            out.append((False, f"MLX base weights missing at {npz}"))
+        link = mlx_base_link(root, weights_dir)
+        ready = root / MLX_SUBDIR / "models" / "mlx" / "dit_medium-base_f16.npz"
+        if link.exists():
+            out.append((True, f"MLX base weights at {link}"))
+        elif check_only or not ready.exists():
+            out.append((False, f"MLX base weights missing at {link}"))
         else:
-            done = _run([python, root / MLX_SUBDIR / "scripts" / "export_base_npz.py", "--base-dir", base, "--output", npz],
-                        cwd=root / MLX_SUBDIR)
-            out.append((done.returncode == 0 and npz.is_file(),
-                        f"MLX base weights exported to {npz}" if done.returncode == 0 else f"export failed: {done.stderr.strip()[-200:]}"))
+            weights_dir.mkdir(parents=True, exist_ok=True)
+            if link.is_symlink():
+                link.unlink()
+            # The link keeps the .npz name at every hop: the MLX loader reads the format from the ending it is given.
+            link.symlink_to(ready.absolute())
+            out.append((True, f"MLX base weights linked at {link}"))
     return out
+
+
+def installed(root: Path, runtime: str, weights_dir: Path) -> bool:
+    """A cheap reading of whether the engine can run here: its own interpreter and, on MLX, its base weights.
+    The full check is provision(check_only=True)."""
+    python = (root / MLX_SUBDIR if runtime == "mlx" else root) / ".venv" / "bin" / "python"
+    if not python.is_file():
+        return False
+    return runtime != "mlx" or mlx_base_link(root, weights_dir).exists()
 
 
 def provision(repo_dir=None, weights_dir=None, *, device: str = "auto", check_only: bool = False) -> Report:

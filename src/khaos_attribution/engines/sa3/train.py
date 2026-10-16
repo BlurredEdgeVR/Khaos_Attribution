@@ -296,7 +296,11 @@ class Session:
         self.tensor_dir = Path(tensor_dir)
         self.output_dir = Path(output_dir)
         self.seed = int(seed)
-        self.resume_from = Path(resume_from) if resume_from else None
+        # The room names a checkpoint by its folder; the trainer wants the adapter file inside it.
+        resume = Path(resume_from) if resume_from else None
+        if resume is not None and resume.is_dir():
+            resume = resume / DESCRIPTOR.adapter["filenames"][0]
+        self.resume_from = resume
         self.save_dir = self.output_dir / TRAINER_DIRNAME
         self.steps = steps_for(cfg, len(pair_files(self.tensor_dir)))
         self.window_seconds = float(cfg.get("window_sec") or 0.0) or longest_clip_seconds(self.tensor_dir)
@@ -517,7 +521,7 @@ class HeldoutEvaluator:
                    "latents_dir": str(self.tensor_val_dir / LATENTS_DIRNAME), "adapter": str(adapter) if adapter else None,
                    "timesteps": self.timesteps, "seed": self.session.seed, "high_noise_t": HIGH_NOISE_T,
                    "checkpoint_root": str(self.session.checkpoint_root.resolve()),
-                   "base_npz": str((self.session.checkpoint_root / BASE_NPZ).resolve())}
+                   "base_npz": str((self.session.checkpoint_root / BASE_NPZ).absolute())}
         done = subprocess.run([str(api.python), str(HELDOUT_WORKER)], input=json.dumps(request), cwd=str(api.root),
                               capture_output=True, text=True, env=_env(api))
         last = (done.stdout or "").strip().splitlines()[-1:] or [""]

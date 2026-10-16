@@ -7,7 +7,7 @@ from khaos_attribution.engines import provision as P
 
 def test_the_statement_is_the_descriptors_and_names_the_gated_weights():
     s = P.statement("stable-audio-3")
-    assert "Stability AI Community License" in s and "google/t5gemma-b-b-ul2 is gated" in s and "never handles a token" in s
+    assert "Stability AI Community License" in s and "stabilityai/stable-audio-3-medium is gated" in s and "never handles a token" in s
     assert P.statement("mock").startswith("mock-engine 1.0 is under the MIT.")
 
 
