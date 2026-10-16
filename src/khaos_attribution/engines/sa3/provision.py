@@ -133,7 +133,8 @@ def contract_into(python: Path) -> tuple:
     from khaos_attribution import __version__  # noqa: PLC0415
     src = os.environ.get(CONTRACT_SRC_ENV, "").strip()
     spec = src if src else f"khaos-attribution @ git+{CONTRACT_REPO}@v{__version__}"
-    done = _run([uv_path(), "pip", "install", "-q", "--python", python, "--no-deps", spec])
+    # With its base dependencies (jsonschema, numpy): the engine's own pins are Stability's, the contract's are light.
+    done = _run([uv_path(), "pip", "install", "-q", "--python", python, spec])
     if done.returncode != 0:
         return False, f"the contract could not be installed into the engine's environment: {done.stderr.strip()[-200:]}"
     return True, f"khaos-attribution {__version__} in the engine's environment"
