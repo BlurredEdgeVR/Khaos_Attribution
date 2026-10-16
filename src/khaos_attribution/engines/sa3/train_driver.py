@@ -67,6 +67,9 @@ def main() -> int:
             super().__init__(*a, **k)
 
     train_lora.pl.Trainer = TrainerWithLosses
+    # The text encoder is read from Stability's open base repository: the same files, no account.
+    from khaos_attribution.engines.sa3.loading import load_for_training  # noqa: PLC0415
+    train_lora.load_model = load_for_training
     train_lora.DiffusionCondInpaintDemoCallback = QuietDemo
     train_lora.main()
     return 0

@@ -18,9 +18,9 @@ def pair_noise_seed(seed: int, name: str) -> int:
 def heldout_torch(req: dict) -> dict:
     import soundfile as sf  # noqa: PLC0415
     import torch  # noqa: PLC0415
-    from stable_audio_3 import StableAudioModel  # noqa: PLC0415
+    from khaos_attribution.engines.sa3.loading import load_model  # noqa: PLC0415
 
-    wrapped = StableAudioModel.from_pretrained(req["model"])
+    wrapped = load_model(req["model"])
     if req.get("adapter"):
         wrapped.load_lora([str(req["adapter"])])
         wrapped.set_lora_strength(1.0)

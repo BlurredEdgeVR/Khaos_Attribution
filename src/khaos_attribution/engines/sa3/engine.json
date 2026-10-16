@@ -10,7 +10,7 @@
   },
   "licence": {
     "name": "Stability AI Community License",
-    "notice": "Stable Audio 3 is under the Stability AI Community License. Its text encoder is Google's t5gemma-b-b-ul2, shipped inside Stability's model repository under Google's Gemma terms; Stability's repository is opened to each user who accepts its terms on Hugging Face.",
+    "notice": "Stable Audio 3 is under the Stability AI Community License. Its text encoder is Google's t5gemma-b-b-ul2, shipped inside Stability's open base repository under Google's Gemma terms; Khaos reads it from there, so no account is needed to run the engine.",
     "obligations": [
       "Stability AI Community License: free below its revenue threshold; the attribution it asks for is shown where the base model is named.",
       "Gemma Terms of Use for the text encoder: access is granted per user by Google; Khaos redistributes the encoder only once the terms are confirmed to allow it."
@@ -22,29 +22,21 @@
       "repo": "stabilityai/stable-audio-3-medium-base",
       "required": true,
       "runtime": "torch",
-      "components": [
-        "model.safetensors",
-        "model_config.json"
-      ]
-    },
-    {
-      "name": "stable-audio-3-medium",
-      "repo": "stabilityai/stable-audio-3-medium",
-      "required": true,
-      "runtime": "torch",
       "patterns": [
+        "model.safetensors",
+        "model_config.json",
         "t5gemma-b-b-ul2/*"
       ],
       "components": [
+        "model.safetensors",
+        "model_config.json",
         "t5gemma-b-b-ul2/config.json",
         "t5gemma-b-b-ul2/model.safetensors",
         "t5gemma-b-b-ul2/tokenizer.json",
         "t5gemma-b-b-ul2/tokenizer_config.json",
         "t5gemma-b-b-ul2/special_tokens_map.json",
         "t5gemma-b-b-ul2/tokenizer.model"
-      ],
-      "gated": true,
-      "gated_by": "Stability's terms, accepted once on Hugging Face; Google's Gemma terms apply to the encoder inside"
+      ]
     },
     {
       "name": "stable-audio-3-optimized",

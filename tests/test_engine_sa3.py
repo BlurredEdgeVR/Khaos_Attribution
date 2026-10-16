@@ -40,7 +40,7 @@ def test_the_descriptor_says_what_the_engine_cannot_do():
     assert d.id == "stable-audio-3" and not d.sings and not d.conditioning["lyrics"] and not d.conditioning["tempo"]
     assert d.sample_rate == 44100 and d.default_variant == "base" and d.render_defaults() == {"steps": 50, "guidance_scale": 7.0, "apg_scale": 1.0}
     assert d.supports("mps", "train") and d.supports("cuda", "render") and not d.supports("cuda", "measure")
-    assert [w["repo"] for w in d.weights if w.get("gated")] == ["stabilityai/stable-audio-3-medium"], "the encoder the config names"
+    assert not [w for w in d.weights if w.get("gated")], "no account is needed: the encoder is read from the open base repository"
     assert d.adapter["type"] == "lora" and d.train["adapter_type"] == "lora" and d.licence["name"].startswith("Stability AI")
 
 

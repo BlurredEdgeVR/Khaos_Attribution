@@ -13,10 +13,10 @@ from pathlib import Path
 
 def _load(req: dict):
     import torch  # noqa: PLC0415
-    from stable_audio_3 import StableAudioModel  # noqa: PLC0415
+    from khaos_attribution.engines.sa3.loading import load_model  # noqa: PLC0415
     from stable_audio_3.models.lora.utils import get_lora_params  # noqa: PLC0415
 
-    wrapped = StableAudioModel.from_pretrained(req["model"])
+    wrapped = load_model(req["model"])
     if not req.get("adapter"):
         raise RuntimeError("a feature needs the adapter; none was named")
     wrapped.load_lora([str(req["adapter"])])

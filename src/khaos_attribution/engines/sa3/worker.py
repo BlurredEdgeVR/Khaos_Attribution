@@ -14,9 +14,9 @@ from pathlib import Path
 def render_torch(req: dict) -> dict:
     import soundfile as sf  # noqa: PLC0415
     import torch  # noqa: PLC0415
-    from stable_audio_3 import StableAudioModel  # noqa: PLC0415
+    from khaos_attribution.engines.sa3.loading import load_model  # noqa: PLC0415
 
-    model = StableAudioModel.from_pretrained(req["model"])
+    model = load_model(req["model"])
     if req.get("adapter"):
         model.load_lora([str(req["adapter"])])
         model.set_lora_strength(float(req["adapter_scale"]))

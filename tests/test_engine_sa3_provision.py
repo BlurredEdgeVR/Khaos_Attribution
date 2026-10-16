@@ -36,16 +36,16 @@ def test_check_compares_the_pin_and_the_environment_and_each_weight(tmp_path, mo
     monkeypatch.setattr(P, "_run", fake_run)
     (root / ".venv" / "bin").mkdir(parents=True)
     (root / ".venv" / "bin" / "python").write_text("")
-    have = {"stabilityai/stable-audio-3-medium-base"}
+    have = set()
     monkeypatch.setattr(P, "cached", lambda repo, files: repo in have)
     report = P.provision(root, tmp_path / "w", device="cuda", check_only=True)
     text = report.text()
     assert "at the pin" in text and "Flash Attention" in text
-    assert "stabilityai/stable-audio-3-medium missing" in text and "google" not in text, "the encoder the config names is Stability's copy"
+    assert "stabilityai/stable-audio-3-medium-base missing" in text and "google" not in text and "medium missing" not in text
     assert "stable-audio-3-optimized" not in text, "the MLX port's set is not the torch runtime's"
-    assert not report.passed, "the gated text encoder is required and absent"
-    have.add("stabilityai/stable-audio-3-medium")
-    assert P.provision(root, tmp_path / "w", device="cuda", check_only=True).passed
+    assert not report.passed
+    have.add("stabilityai/stable-audio-3-medium-base")
+    assert P.provision(root, tmp_path / "w", device="cuda", check_only=True).passed, "one open repository is the whole torch set"
 
 
 def test_an_install_fills_the_cache_through_the_engines_own_downloader(tmp_path, monkeypatch):
@@ -63,17 +63,17 @@ def test_an_install_fills_the_cache_through_the_engines_own_downloader(tmp_path,
         if "-c" in cmd and "import torch" in cmd[-1]:
             return _done(0, "ok")
         if "snapshot_download" in " ".join(cmd):
-            return _done(1, err="401 Client Error: gated") if cmd[-2].endswith("stable-audio-3-medium") else _done()
+            return _done(1, err="Connection timed out") if calls and sum("snapshot_download" in " ".join(c) for c, _ in calls) > 1 else _done()
         return _done()
     monkeypatch.setattr(P, "_run", fake_run)
-    monkeypatch.setattr(P, "cached", lambda repo, files: "medium-base" in repo and any("medium-base" in " ".join(c) for c, _ in calls))
+    monkeypatch.setattr(P, "cached", lambda repo, files: any("snapshot_download" in " ".join(c) and c[-2] == repo for c, _ in calls))
     report = P.provision(root, tmp_path / "w", device="cuda")
     text = report.text()
     downloads = [c for c, _ in calls if "snapshot_download" in " ".join(c)]
-    assert [c[-2] for c in downloads] == ["stabilityai/stable-audio-3-medium-base", "stabilityai/stable-audio-3-medium"]
-    assert downloads[1][-1] == '["t5gemma-b-b-ul2/*"]', "only the encoder is fetched from the distilled model's repository"
+    assert [c[-2] for c in downloads] == ["stabilityai/stable-audio-3-medium-base"], "one open repository, nothing gated"
+    assert "t5gemma-b-b-ul2/*" in downloads[0][-1] and "svd_bases" not in downloads[0][-1], "the weights, the config and the encoder, not the SVD bases"
     assert all(env.get("HF_HUB_OFFLINE") == "0" and "PYTHONPATH" not in env for c, env in calls if "snapshot_download" in " ".join(c))
-    assert "hf auth login" in text and not report.passed
+    assert report.passed and "hf auth login" not in text
 
 
 def test_without_git_the_code_comes_from_the_archive_at_the_pin(tmp_path, monkeypatch):
