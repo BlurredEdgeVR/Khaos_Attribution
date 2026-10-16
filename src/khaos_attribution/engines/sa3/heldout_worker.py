@@ -48,6 +48,10 @@ def heldout_torch(req: dict) -> dict:
                 latents = model.pretransform.encode(x)
             latents = latents.float()
             cond = model.conditioner([{"prompt": caption, "seconds_total": seconds}], device)
+            # The trainer always conditions on an inpaint mask (0 = generate, 1 = keep); a held-out clip is
+            # generated whole, so the mask is all zeros and the masked input empty.
+            cond["inpaint_mask"] = [torch.zeros(1, 1, latents.shape[-1], dtype=torch.bool, device=latents.device)]
+            cond["inpaint_masked_input"] = [torch.zeros_like(latents)]
             valid = int(round(n / ratio))
             mask = torch.zeros(1, latents.shape[-1], dtype=torch.bool, device=latents.device)
             mask[:, :max(1, min(valid, latents.shape[-1]))] = True
