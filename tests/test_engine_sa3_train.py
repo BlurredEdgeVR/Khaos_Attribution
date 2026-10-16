@@ -119,6 +119,10 @@ def test_the_mlx_runtime_reads_the_telemetry_and_needs_the_base_npz(api, tmp_pat
                              device="mps", precision="bf16", seed=1)
     cmd = session.command()
     assert "--latents-dir" in cmd and "--dit-weights" in cmd and "--grad-checkpoint" in cmd
+    config = json.loads((tmp_path / "run" / "sa3" / "prompt_config.json").read_text())
+    assert config["tag_keys"] == ["prompt"] and config["hide_tag_names"] is True and config["shuffle"] is False, \
+        "the caption reaches the MLX trainer verbatim"
+    assert cmd[cmd.index("--prompt-config") + 1].endswith("prompt_config.json")
     updates = list(session.train())
     assert [u.kind for u in updates if u.kind in ("epoch", "checkpoint")] == ["epoch", "checkpoint", "epoch", "checkpoint"]
     laid = sorted((tmp_path / "run" / "checkpoints").glob("epoch_*/adapter_model.safetensors"))

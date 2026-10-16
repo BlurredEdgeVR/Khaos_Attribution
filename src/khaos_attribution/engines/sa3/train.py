@@ -231,7 +231,15 @@ def trainer_command(api: TrainingApi, cfg: dict, *, tensor_dir: Path, save_dir: 
                 *(["--lora_checkpoint", str(resume_from)] if resume_from else [])]
     mlx = api.root / MLX_SUBDIR
     crop = max(2, int(round(window_seconds * DESCRIPTOR.sample_rate / 4096)))
+    # The MLX trainer builds each clip's prompt from its sidecar tags; without this config it would train on an
+    # EMPTY prompt. The caption (the pre-encoder's "prompt" tag, read from the .txt beside the clip) goes through
+    # verbatim: Khaos's captions already carry the trigger phrase.
+    save_dir.mkdir(parents=True, exist_ok=True)
+    prompt_config = save_dir / "prompt_config.json"
+    prompt_config.write_text(json.dumps({"use_tags": True, "tag_keys": ["prompt"], "hide_tag_names": True,
+                                         "shuffle": False, "balance": {"tags": 100}}, indent=1) + "\n")
     return [str(api.python), str(mlx / "scripts" / "lora_train_mlx.py"), "--dit", "medium",
+            "--prompt-config", str(prompt_config),
             "--dit-weights", str(checkpoint_root / BASE_NPZ), "--latents-dir", str(tensor_dir / LATENTS_DIRNAME),
             "--lr", str(lr), "--max-steps", str(steps["total"]), "--rank", str(a["rank"]), "--alpha", str(a["alpha"]),
             "--adapter-type", adapter_type, "--latent-crop-length", str(crop), "--grad-checkpoint",
