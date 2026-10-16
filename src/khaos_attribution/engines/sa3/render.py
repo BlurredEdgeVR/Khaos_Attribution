@@ -150,10 +150,8 @@ def run_worker(root: Path, runtime: str, request: dict, *, should_stop=None, tim
     env = {**os.environ, "PYTHONPATH": str(root), "HF_HUB_OFFLINE": os.environ.get("HF_HUB_OFFLINE", "1"),
            "WANDB_MODE": "disabled"}
     try:
-        # Its own session, so a stop reaches the MLX render the worker spawns, not only the worker.
         proc = subprocess.Popen([str(python), str(WORKER)], cwd=str(root), env=env, stdin=subprocess.PIPE,
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, errors="replace",
-                                start_new_session=True)
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, errors="replace")
     except OSError as exc:
         raise RenderFailed(f"the Stable Audio 3 worker could not start: {exc}") from exc
     try:
@@ -175,16 +173,21 @@ def run_worker(root: Path, runtime: str, request: dict, *, should_stop=None, tim
 
 
 def stop_tree(proc) -> None:
-    """The worker and whatever it spawned: asked first, killed after a short grace, always reaped."""
+    """The process and whatever it spawned: asked first, killed after a short grace, always reaped. A process
+    that leads its own group is signalled as a group; one inside the room's group is signalled itself and
+    forwards the signal to its child (the worker does)."""
     import signal  # noqa: PLC0415
     import time  # noqa: PLC0415
     if proc.poll() is not None:
         return
     for sig in (signal.SIGTERM, signal.SIGKILL):
         try:
-            os.killpg(proc.pid, sig)
+            if os.getpgid(proc.pid) == proc.pid:
+                os.killpg(proc.pid, sig)
+            else:
+                proc.send_signal(sig)
         except (ProcessLookupError, PermissionError, OSError):
-            proc.kill()
+            pass
         deadline = time.monotonic() + 3.0
         while proc.poll() is None and time.monotonic() < deadline:
             time.sleep(0.1)

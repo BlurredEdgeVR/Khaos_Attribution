@@ -71,7 +71,7 @@ def render_mlx(req: dict) -> dict:
                 f"{float(req.get('repaint_start') or 0.0)}:{float(end) if end is not None and float(end) >= 0 else float(req['seconds'])}"]
     elif req.get("mode") not in (None, "text2music", "retake"):
         dropped.append(f"mode {req['mode']} without source audio")
-    done = subprocess.run(cmd, cwd=str(here), capture_output=True, text=True)
+    done = _run_forwarding_stop(cmd, cwd=str(here))
     if done.returncode != 0:
         tail = "\n".join(done.stderr.strip().splitlines()[-8:])
         return {"error": f"sa3_mlx.py failed ({done.returncode}): {tail}"}
@@ -83,6 +83,26 @@ def render_mlx(req: dict) -> dict:
     except Exception:  # noqa: BLE001
         pass
     return {"seed": seed, "sample_rate": rate, "dropped": dropped, "runtime": "mlx"}
+
+
+def _run_forwarding_stop(cmd: list, *, cwd: str):
+    """The render as a child that dies with this worker: a stop asked of the worker is passed on, so no render
+    outlives a cancel."""
+    import signal  # noqa: PLC0415
+    proc = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, errors="replace")
+
+    def _forward(signum, _frame):
+        proc.terminate()
+        try:
+            proc.wait(timeout=3.0)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+        sys.exit(128 + signum)
+
+    signal.signal(signal.SIGTERM, _forward)
+    out, err = proc.communicate()
+    return subprocess.CompletedProcess(cmd, proc.returncode, out, err)
 
 
 def main() -> int:

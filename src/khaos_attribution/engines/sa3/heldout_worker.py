@@ -79,7 +79,7 @@ def heldout_mlx(req: dict) -> dict:
     sys.path.insert(0, str(mlx_dir))
     sys.path.insert(0, str(mlx_dir / "scripts"))
     import mlx.core as mx  # noqa: PLC0415
-    from lora_train_mlx import (DIT_CHOICES, T5GEMMA_NPZ_REL, LATENT_CROP_DEFAULTS, T5Gemma, TrainBundle,  # noqa: PLC0415
+    from lora_train_mlx import (DIT_CHOICES, T5GEMMA_NPZ_REL, T5Gemma, TrainBundle,  # noqa: PLC0415
                                 TrainableSecondsEmbedder, build_conditioning, ensure_local, inject_from_lora_config,
                                 load_conditioner_from_npz, load_lora_checkpoint, load_trainable_lora_state,
                                 rectified_flow_loss, underfit_lora_config)

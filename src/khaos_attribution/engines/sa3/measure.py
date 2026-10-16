@@ -89,6 +89,10 @@ def _env(handle: Handle) -> dict:
             "HF_HUB_OFFLINE": os.environ.get("HF_HUB_OFFLINE", "1")}
 
 
+_REPLY_KEYS = {"parameters": ("n_params", "n_tensors", "signature"), "index": ("rows", "matrix"), "feature": ("feature",),
+               "loss": ("with", "without")}
+
+
 def _ask(handle: Handle, request: dict) -> dict:
     from khaos_attribution.gradient import GradientUnavailable  # noqa: PLC0415
     try:
@@ -109,9 +113,6 @@ def _ask(handle: Handle, request: dict) -> dict:
         raise GradientUnavailable(f"the Stable Audio 3 measure worker's reply lacks {', '.join(missing)}")
     return reply
 
-
-_REPLY_KEYS = {"parameters": ("n_params", "n_tensors", "signature"), "index": ("rows", "matrix"), "feature": ("feature",),
-               "loss": ("with", "without")}
 
 
 def _base(handle: Handle, index_meta: dict, files, command: str) -> dict:

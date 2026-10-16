@@ -250,6 +250,10 @@ def test_save_final_refuses_an_older_epoch_and_resume_sets_the_earlier_run_aside
                              output_dir=tmp_path / "run", device="cuda", precision="bf16", seed=1, resume_from=session.latest_adapter)
     resumed.install_hooks(start_epoch=2)
     assert resumed.run_steps()["total"] == 4 and "--lora_checkpoint" in resumed.command()
+    mlx = T.Session(T.TrainingApi(root=api.root, runtime="mlx", python=sys.executable), recipe, checkpoint_root=tmp_path,
+                    tensor_dir=tensors, output_dir=tmp_path / "run", seed=1, resume_from=session.latest_adapter)
+    cmd = mlx.command()
+    assert "--lora-ckpt-path" in cmd and cmd[cmd.index("--step-offset") + 1] == "0", "the MLX trainer counts this run from zero"
     updates = list(resumed.train())
     assert [u.epoch for u in updates if u.kind == "epoch"] == [3, 4]
     assert [u.epoch for u in updates if u.kind == "checkpoint"] == [3, 4]

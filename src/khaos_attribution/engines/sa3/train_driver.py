@@ -55,9 +55,15 @@ def main() -> int:
 
     real_trainer = pl.Trainer
 
+    # Stability's checkpoint callback saves on its cadence alone: when the run's length is not a multiple of it,
+    # a second one saves the final step, so the last epoch's weights always exist to export.
+    total = int(args[args.index("--steps") + 1]) if "--steps" in args else 0
+    every = int(args[args.index("--checkpoint_every") + 1]) if "--checkpoint_every" in args else 0
+    final = [pl.callbacks.ModelCheckpoint(every_n_train_steps=total, save_top_k=-1)] if total and every and total % every else []
+
     class TrainerWithLosses(real_trainer):
         def __init__(self, *a, **k):
-            k["callbacks"] = [*(k.get("callbacks") or []), KhaosLosses()]
+            k["callbacks"] = [*(k.get("callbacks") or []), *final, KhaosLosses()]
             super().__init__(*a, **k)
 
     train_lora.pl.Trainer = TrainerWithLosses

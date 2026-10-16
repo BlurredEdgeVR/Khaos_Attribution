@@ -12,11 +12,9 @@ import os
 import shutil
 import struct
 import subprocess
-import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from khaos_attribution.engines.render import RenderFailed
 from khaos_attribution.engines.sa3 import DESCRIPTOR
@@ -247,7 +245,8 @@ def trainer_command(api: TrainingApi, cfg: dict, *, tensor_dir: Path, save_dir: 
             "--adapter-type", adapter_type, "--latent-crop-length", str(crop), "--grad-checkpoint",
             "--save-dir", str(save_dir), "--name", "khaos", "--checkpoint-every", str(steps["checkpoint_every"]),
             "--seed", str(int(seed)), "--demo-every", "0",
-            *(["--lora-ckpt-path", str(resume_from)] if resume_from else [])]
+            # Explicit zero offsets: the trainer then counts this run's steps from zero, as the torch one does.
+            *(["--lora-ckpt-path", str(resume_from), "--step-offset", "0", "--epoch-offset", "0"] if resume_from else [])]
 
 
 def losses_from_metrics_csv(save_dir: Path) -> list:
@@ -315,7 +314,7 @@ class Session:
 
     def run_steps(self) -> dict:
         """The steps this process runs: the epochs left after a resume, at the planned cadence."""
-        left = max(1, self.steps["epochs"] - getattr(self, "start_epoch", 0))
+        left = max(1, self.steps["epochs"] - self.start_epoch)
         return {**self.steps, "epochs": left, "total": self.steps["per_epoch"] * left}
 
     def command(self) -> list:
@@ -331,15 +330,13 @@ class Session:
     def _set_aside_earlier_run(self) -> None:
         """A resumed run's logs and checkpoints move out of the way, or the old rows would replay as new epochs."""
         aside = self.save_dir / f"before_resume_{time.strftime('%Y%m%d_%H%M%S')}"
-        moved = False
         for f in [self.save_dir / LOSSES_CSV, self.save_dir / TELEMETRY,
                   *self.save_dir.rglob("*.ckpt"), *self.save_dir.rglob("*.safetensors")]:
-            if f.is_file() and aside not in f.parents:
-                aside.mkdir(parents=True, exist_ok=True)
-                shutil.move(str(f), str(aside / f.name))
-                moved = True
-        if not moved and aside.is_dir():
-            aside.rmdir()
+            rel = f.relative_to(self.save_dir)
+            if not f.is_file() or any(part.startswith("before_resume_") for part in rel.parts):
+                continue
+            (aside / rel).parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(f), str(aside / rel))
 
     def _checkpoints(self) -> dict:
         found = {}
@@ -363,7 +360,7 @@ class Session:
         return final or seen == (st.st_size, st.st_mtime_ns)
 
     def _epoch_of(self, step: int) -> int:
-        return getattr(self, "start_epoch", 0) + max(1, round(step / self.steps["per_epoch"]))
+        return self.start_epoch + max(1, round(step / self.steps["per_epoch"]))
 
     def _lay_out(self, step: int, source: Path, loss: float) -> Path:
         """The checkpoint in the Workshop's layout, converted to safetensors when the trainer wrote a .ckpt."""
@@ -390,14 +387,14 @@ class Session:
         if self.resume_from is not None:
             self._set_aside_earlier_run()
         self._sizes = {}
-        offset = getattr(self, "start_epoch", 0)
+        offset = self.start_epoch
         cmd = self.command()
         (self.save_dir / "train_command.json").write_text(json.dumps({"command": cmd, "steps": self.run_steps(),
                                                                       "window_seconds": self.window_seconds}, indent=1) + "\n")
         log_file = (self.save_dir / "trainer_stdout.log").open("ab")
-        # Its own session, so a stop reaches the trainer's data workers too.
+        # In the job's own process group, so the room's Stop and Pause signals reach the trainer as they do the job.
         self.process = subprocess.Popen(cmd, cwd=str(self.save_dir), env=_env(self.api), stdout=log_file,
-                                        stderr=subprocess.STDOUT, start_new_session=True)
+                                        stderr=subprocess.STDOUT)
         try:
             yield from self._follow(offset)
         finally:
