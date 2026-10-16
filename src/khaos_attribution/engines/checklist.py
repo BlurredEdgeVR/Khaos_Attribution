@@ -97,11 +97,15 @@ def check(engine_id: str, workdir: Path | str | None = None, *, live: bool = Fal
     out.add("render.words", getattr(slots["render"], "RenderRequest", None) is RenderRequest
             and getattr(slots["render"], "RenderResult", None) is RenderResult,
             "the slot speaks the socket's RenderRequest and RenderResult")
-    plan = None
+    measures = any("measure" in v for v in d.platforms.values())
     try:
         plan = slots["measure"].memory_plan("cpu", 30.0, total_gb=1e6, env={})
-        out.add("measure.memory_plan", isinstance(plan, dict) and plan.get("fits") == "resident" and "refusal" in plan,
-                str(plan)[:120])
+        if measures:
+            ok = isinstance(plan, dict) and plan.get("fits") == "resident" and "refusal" in plan
+        else:
+            # An engine that measures nowhere must say so, never hand back a number.
+            ok = isinstance(plan, dict) and plan.get("fits") is None and bool(plan.get("refusal"))
+        out.add("measure.memory_plan", ok, str(plan)[:120])
     except Exception as exc:  # noqa: BLE001
         out.add("measure.memory_plan", False, f"{type(exc).__name__}: {exc}")
     if live and renderer_cls is not None:

@@ -1,0 +1,83 @@
+{
+  "schema_version": "1",
+  "id": "stable-audio-3",
+  "name": "Stable Audio 3 Medium",
+  "version": "3.0-medium",
+  "code": {
+    "repo": "https://github.com/Stability-AI/stable-audio-3.git",
+    "commit": "77e0398c26f7d22d801ec1bb036307e8b231f741",
+    "commit_note": "The trial's pin. The CUDA trainer and renderer are the package; the Apple silicon path is the MLX port under optimized/mlx in the same checkout."
+  },
+  "licence": {
+    "name": "Stability AI Community License",
+    "notice": "Stable Audio 3 is under the Stability AI Community License. Its text encoder, google/t5gemma-b-b-ul2, brings Google's Gemma terms, which each user accepts on Hugging Face.",
+    "obligations": [
+      "Stability AI Community License: free below its revenue threshold; the attribution it asks for is shown where the base model is named.",
+      "Gemma Terms of Use for the text encoder: access is granted per user by Google; Khaos redistributes the encoder only once the terms are confirmed to allow it."
+    ]
+  },
+  "weights": [
+    {
+      "name": "stable-audio-3-medium-base",
+      "repo": "stabilityai/stable-audio-3-medium-base",
+      "required": true,
+      "components": ["model.safetensors", "model_config.json"]
+    },
+    {
+      "name": "stable-audio-3-medium",
+      "repo": "stabilityai/stable-audio-3-medium",
+      "required": false,
+      "components": ["model.safetensors", "model_config.json"]
+    },
+    {
+      "name": "t5gemma-b-b-ul2",
+      "repo": "google/t5gemma-b-b-ul2",
+      "required": true,
+      "gated": true,
+      "gated_by": "Google's Gemma terms, approved by hand on Hugging Face"
+    }
+  ],
+  "platforms": {
+    "cuda": ["train", "render"],
+    "mps": ["train", "render"]
+  },
+  "conditioning": {
+    "tempo": false,
+    "key": false,
+    "time_signature": false,
+    "lyrics": false,
+    "vocal_language": false,
+    "trigger": true,
+    "duration": true
+  },
+  "sings": false,
+  "sample_rate": 44100,
+  "variants": {
+    "base": {
+      "config": "medium-base",
+      "render": {
+        "steps": 50,
+        "guidance_scale": 7.0,
+        "apg_scale": 1.0
+      },
+      "note": "Adapters train and render on the un-distilled base checkpoint (50 steps, guidance 7), so an adapter is served on the weights it trained on. The distilled 'medium' checkpoint (8 steps, guidance 1) is not used for adapters."
+    }
+  },
+  "default_variant": "base",
+  "render_setting_keys": ["steps", "guidance_scale", "apg_scale"],
+  "bounds": {
+    "duration_seconds": [5, 120],
+    "steps": [1, 200],
+    "bpm": [30, 300],
+    "takes": [1, 16]
+  },
+  "rework_modes": ["retake", "repaint", "audio2audio"],
+  "adapter": {
+    "type": "dora-rows",
+    "filenames": ["adapter_model.safetensors"],
+    "resumable": true
+  },
+  "measure": {
+    "feature_version": "unmeasured"
+  }
+}

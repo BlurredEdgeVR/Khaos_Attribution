@@ -16,8 +16,9 @@ def test_the_mock_engine_passes_the_whole_checklist_live(tmp_path):
             "render.words", "measure.memory_plan"} <= names
 
 
-def test_acestep_passes_the_surface_checks_without_its_weights(tmp_path):
-    result = C.check("acestep-1.5", tmp_path, live=False)
+@pytest.mark.parametrize("engine_id", ["acestep-1.5", "stable-audio-3"])
+def test_a_real_engine_passes_the_surface_checks_without_its_weights(tmp_path, engine_id):
+    result = C.check(engine_id, tmp_path, live=False)
     assert result.passed, result.report()
     assert not any(f.name.startswith("live.") for f in result.findings)
 

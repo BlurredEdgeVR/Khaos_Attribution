@@ -12,6 +12,7 @@ from khaos_attribution.engines.descriptor import Descriptor, DescriptorError, lo
 # Engine id -> the package that implements it. Adding an engine is one line here and one package.
 KNOWN_ENGINES = {
     "acestep-1.5": "khaos_attribution.engines.acestep",
+    "stable-audio-3": "khaos_attribution.engines.sa3",
     "mock": "khaos_attribution.engines.mock",
 }
 
