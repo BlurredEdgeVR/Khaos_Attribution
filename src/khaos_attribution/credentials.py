@@ -11,6 +11,7 @@ import datetime
 import hashlib
 import json
 import os
+import stat
 import socket
 import sys
 import tempfile
@@ -239,7 +240,7 @@ def manifest(record: dict, *, product: str, version: str, title: str, mime: str,
 
 def tsa_url() -> str | None:
     url = os.environ.get("KHAOS_TSA_URL", DEFAULT_TSA_URL).strip()
-    return None if url in ("", "off") else url
+    return None if url.lower() in ("", "off", "none", "0", "false") else url
 
 
 _TSA_DOWN: dict[str, float] = {}
@@ -270,6 +271,7 @@ def sign_file(path: Path | str, record: dict, identity: Identity, *, product: st
         raise ValueError(f"{path.suffix} files cannot carry Content Credentials here")
     doc = json.dumps(manifest(record, product=product, version=version, title=path.name, mime=mime, note=note))
     url = tsa_url() if timestamp_url == "default" else timestamp_url
+    mode = stat.S_IMODE(path.stat().st_mode)
     if url and not _tsa_reachable(url):
         url = None
     last = None
@@ -281,9 +283,12 @@ def sign_file(path: Path | str, record: dict, identity: Identity, *, product: st
         try:
             with open(path, "rb") as src, open(tmp, "wb") as dst:
                 c2pa.Builder.from_json(doc).sign(signer, mime, src, dst)
+            os.chmod(tmp, mode)    # the temp file is made private; the signed file keeps the original's mode
             _replace(tmp, path)
         except Exception as exc:  # noqa: BLE001 — a time-stamping service that fails leaves the file unstamped
             last = exc
+            if attempt_url:
+                _TSA_DOWN[attempt_url] = time.monotonic() + TSA_RETRY_S    # a failed stamp, not only a closed port
             continue
         finally:
             signer.close()

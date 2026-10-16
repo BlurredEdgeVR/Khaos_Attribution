@@ -156,3 +156,15 @@ def test_the_real_client_speaks_http_to_a_live_register(tmp_path):
     rec["model"]["watermark_payload"] = derive_payload(key.key_id, "run_1")
     assert client.publish(R.sign_record(rec, key))["serial"] == R.FIRST_SERIAL
     server.should_exit = True
+
+
+def test_an_outbox_entry_found_in_both_pending_and_sent_is_finished_not_resent(tmp_path):
+    """A crash between the copy into sent/ and the unlink would otherwise resend the entry forever."""
+    from khaos_attribution.registry import Outbox
+    box = Outbox(tmp_path)
+    box.append("served", {"serial": 1, "nonce": "0123456789ab"})
+    (path, entry), = box.pending()
+    box._move(path, "sent", {"ok": True})
+    path.write_text(json.dumps(entry), encoding="utf-8")    # the unlink that never happened
+    assert box.pending() == [] and not path.exists()
+    assert [e["kind"] for e in box.sent_entries()] == ["served"]

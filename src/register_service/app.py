@@ -20,7 +20,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from khaos_attribution import registry as R
 from khaos_attribution.watermark import decode_codeword
 from register_service import softbinding
-from register_service.index import Index
+from register_service.index import Index, phases_of
 from register_service.store import Store, now_utc
 
 MAX_BODY = 8_000_000   # a long output's four-phase fingerprint runs to a few megabytes
@@ -159,9 +159,12 @@ def create_app(cfg: dict | None = None) -> FastAPI:
         tmp = mirror / "models" / f"{serial}.json.new"
         tmp.write_text(json.dumps(doc, indent=1, sort_keys=True) + "\n", encoding="utf-8")
         os.replace(tmp, mirror / "models" / f"{serial}.json")
-        with open(mirror / "ledger.jsonl", "w", encoding="utf-8") as fh:
+        # The mirror is rsynced on a timer; a reader must never meet a half-written ledger.
+        new = mirror / "ledger.jsonl.new"
+        with open(new, "w", encoding="utf-8") as fh:
             for e in store.ledger():
                 fh.write(json.dumps(e, sort_keys=True) + "\n")
+        os.replace(new, mirror / "ledger.jsonl")
 
     def mirror_quietly(serial: int) -> None:
         # The record is in the ledger; a mirror that cannot be written is logged and written on the next change.
@@ -253,13 +256,14 @@ def create_app(cfg: dict | None = None) -> FastAPI:
             try:
                 out = store.withdraw(serial_of(body), key_id, str(body.get("reason", "")))
             except KeyError as e:
-                raise HTTPException(404, str(e)) from None
+                raise HTTPException(404, e.args[0]) from None
             except PermissionError as e:
                 raise HTTPException(403, str(e)) from None
             index.release_claims(out["serial"])
+            index.withdraw_model(out["serial"])
             mirror_quietly(out["serial"])
             return out
-        return once(body, key_id, work)
+        return await run_in_threadpool(once, body, key_id, work)
 
     @app.post("/api/served")
     async def served(request: Request):
@@ -269,15 +273,18 @@ def create_app(cfg: dict | None = None) -> FastAPI:
             raise HTTPException(422, "state is serving or removed")
 
         def work():
+            rec = store.record(serial_of(body))
+            if rec and rec["state"] == "withdrawn" and state == "serving":
+                raise HTTPException(410, "the model is withdrawn; a Space does not serve it")
             try:
                 out = store.served(serial_of(body), key_id, str(body.get("space_url", ""))[:200], state)
             except KeyError as e:
-                raise HTTPException(404, str(e)) from None
+                raise HTTPException(404, e.args[0]) from None
             except PermissionError as e:
                 raise HTTPException(403, str(e)) from None
             mirror_quietly(out["serial"])
             return out
-        return once(body, key_id, work)
+        return await run_in_threadpool(once, body, key_id, work)
 
 
     @app.post("/api/outputs")
@@ -307,7 +314,24 @@ def create_app(cfg: dict | None = None) -> FastAPI:
             kept = manifest is not None and index.keep_manifest(gid, manifest, key_id)
             return {**{k: out[k] for k in ("generation_id", "serial", "payload", "released_at", "landmarks", "already")},
                     "manifest_kept": kept}
-        return once(body, key_id, work)
+        return await run_in_threadpool(once, body, key_id, work)
+
+    @app.post("/api/outputs/remove")
+    async def outputs_remove(request: Request):
+        """A released piece its maker took down: by the machine that released it. Its fingerprint stays so a copy
+        found later is still named; the answer says removed, and the lookup no longer offers it."""
+        body, machine, key_id, _ = await signed_body(request)
+
+        def work():
+            gid = str(body.get("generation_id") or "").strip()
+            out = index.output(gid) if gid and len(gid) <= 120 else None
+            if out is None:
+                raise HTTPException(404, "no such released piece")
+            if out["released_by"] != key_id:
+                raise HTTPException(403, "only the machine that released a piece removes it")
+            out = index.remove_output(gid, int(out["serial"]))
+            return {"generation_id": gid, "serial": out["serial"], "removed_at": out["removed_at"]}
+        return await run_in_threadpool(once, body, key_id, work)
 
     def manifest_bytes(value) -> bytes | None:
         """A released output's Content Credentials manifest store (base64 of its JUMBF); None when none was sent or it
@@ -326,14 +350,12 @@ def create_app(cfg: dict | None = None) -> FastAPI:
         if machine["role"] != "workshop":
             raise HTTPException(403, "only a Workshop claims or checks training tracks")
 
-    def phases_of(body: dict) -> list:
-        phases = body.get("phases")
-        if not isinstance(phases, list) or not phases or not all(isinstance(p, list) for p in phases):
-            raise HTTPException(422, "phases is a list of fingerprint lists")
+    def query_phases_in(body: dict) -> list:
+        """A body's phases through the index's one bounded parser; a bad body is a 422 in the parser's words."""
         try:
-            return [[(int(h), int(o)) for h, o in p] for p in phases]
-        except (TypeError, ValueError):
-            raise HTTPException(422, "a landmark is [hash, offset_ms]") from None
+            return phases_of(body.get("phases"))
+        except ValueError as e:
+            raise HTTPException(422, str(e)) from None
 
     @app.post("/api/claims")
     async def claims(request: Request):
@@ -375,7 +397,7 @@ def create_app(cfg: dict | None = None) -> FastAPI:
         and whether it is a released output: the Workshop's one question at import."""
         body, machine, _, _ = await signed_body(request)
         workshop_only(machine)
-        return await run_in_threadpool(index.check_claim, phases_of(body), machine["account_id"])
+        return await run_in_threadpool(index.check_claim, query_phases_in(body), machine["account_id"])
 
     @app.get("/api/models/{serial}/claims")
     def model_claims(serial: int):
@@ -397,13 +419,7 @@ def create_app(cfg: dict | None = None) -> FastAPI:
             raise HTTPException(400, "not JSON") from None
         if not isinstance(body, dict):
             raise HTTPException(400, "the body must be a JSON object")
-        phases = body.get("phases")
-        if not isinstance(phases, list) or not phases or not all(isinstance(p, list) for p in phases):
-            raise HTTPException(422, "phases is a list of fingerprint lists")
-        try:
-            phases = [[(int(h), int(o)) for h, o in p] for p in phases]
-        except (TypeError, ValueError):
-            raise HTTPException(422, "a landmark is [hash, offset_ms]") from None
+        phases = query_phases_in(body)
         payload = None
         codeword = body.get("watermark_id")
         if codeword is not None:
@@ -418,6 +434,7 @@ def create_app(cfg: dict | None = None) -> FastAPI:
         if answer["grade"] == "output":
             rec = store.record(int(answer["output"]["serial"]))
             answer["model"] = _model_summary(rec) if rec else None
+            answer["removed_at"] = answer["output"].get("removed_at")
         elif answer["grade"] == "bucket":
             answer["models"] = [_model_summary(store.record(s)) for s in store.serials_in_bucket(payload)]
         return answer
@@ -518,7 +535,7 @@ def create_app(cfg: dict | None = None) -> FastAPI:
                                                 (P.state_chip(rec["state"]), "")]))
         para = ("The public ledger of registered fine-tuned models: what each was trained on, as its artist attested, "
                 "countersigned by the register and never edited.")
-        facts = [P.count(len(serials), "model") + " registered", "ledger unbroken" if store.ledger_ok() else "ledger BROKEN",
+        facts = [P.count(len(serials), "model") + " registered", "ledger unbroken" if store.ledger_status()["ok"] else "ledger BROKEN",
                  "serials from 65,536"]
         body = P.hero("The Guild of Fine Tuners", "The Guild Register.", para, facts)
         body += P.section("Registered models", "newest first")
@@ -528,8 +545,8 @@ def create_app(cfg: dict | None = None) -> FastAPI:
 
     @app.get("/health")
     def health():
-        return JSONResponse({"ok": True, "ledger_ok": store.ledger_ok(), "models": len(store.serials()), "outputs": index.count(),
+        return JSONResponse({"ok": True, "ledger_ok": store.ledger_status()["ok"], "models": len(store.serials()), "outputs": index.count(),
                              "development": bool(cfg["dev_key"])})
 
-    softbinding.add_routes(app, index, store, cfg["public_url"])
+    softbinding.add_routes(app, index, cfg["public_url"])
     return app

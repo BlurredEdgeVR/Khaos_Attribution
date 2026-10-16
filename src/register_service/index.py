@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS fingerprints (hash INTEGER NOT NULL, generation_id TE
 CREATE INDEX IF NOT EXISTS fingerprints_hash ON fingerprints (hash);
 CREATE INDEX IF NOT EXISTS fingerprints_gen ON fingerprints (generation_id);
 CREATE INDEX IF NOT EXISTS outputs_payload ON outputs (payload);
+CREATE INDEX IF NOT EXISTS fingerprints_vote ON fingerprints (hash, generation_id, offset_ms);
 CREATE TABLE IF NOT EXISTS manifests (generation_id TEXT PRIMARY KEY, store BLOB NOT NULL, sha256 TEXT NOT NULL,
     kept_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS claims (claim_id INTEGER PRIMARY KEY, account_id INTEGER NOT NULL, serial INTEGER NOT NULL,
@@ -28,11 +29,15 @@ CREATE TABLE IF NOT EXISTS claims (claim_id INTEGER PRIMARY KEY, account_id INTE
   landmarks INTEGER NOT NULL, UNIQUE (serial, track_id));
 CREATE TABLE IF NOT EXISTS claim_fingerprints (hash INTEGER NOT NULL, claim_id INTEGER NOT NULL, offset_ms INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS claim_fingerprints_hash ON claim_fingerprints (hash);
+CREATE INDEX IF NOT EXISTS claim_fingerprints_vote ON claim_fingerprints (hash, claim_id, offset_ms);
 CREATE INDEX IF NOT EXISTS claim_fingerprints_claim ON claim_fingerprints (claim_id);
 CREATE TABLE IF NOT EXISTS claim_shares (claim_id INTEGER NOT NULL, other_claim INTEGER NOT NULL, votes INTEGER NOT NULL,
   at TEXT NOT NULL, PRIMARY KEY (claim_id, other_claim));
 """
 MAX_LANDMARKS = 200_000
+MAX_PHASES = 8
+# Columns a first-version index file gains in place.
+_ADDED = (("outputs", "withdrawn", "INTEGER NOT NULL DEFAULT 0"), ("outputs", "removed_at", "TEXT"))
 CANDIDATES = 50
 
 
@@ -44,6 +49,9 @@ class Index:
         self._local = threading.local()
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.executescript(SCHEMA)
+        for table, column, declaration in _ADDED:
+            if column not in {r["name"] for r in self.db.execute(f"PRAGMA table_info({table})")}:
+                self.db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
 
     @property
     def db(self) -> sqlite3.Connection:
@@ -95,6 +103,27 @@ class Index:
     def has_manifest(self, generation_id: str) -> bool:
         return self.db.execute("SELECT 1 FROM manifests WHERE generation_id = ?", (generation_id,)).fetchone() is not None
 
+    def withdraw_model(self, serial: int) -> int:
+        """A withdrawn model's pieces are not offered by any door: the one rule, kept on the rows."""
+        with self._lock:
+            return self.db.execute("UPDATE outputs SET withdrawn = 1 WHERE serial = ?", (int(serial),)).rowcount
+
+    def remove_output(self, generation_id: str, serial: int) -> dict | None:
+        """A piece its maker took down: its fingerprint stays, so a copy found later is still named, but the answer
+        says it was removed and the lookup no longer offers it."""
+        with self._lock:
+            row = self.db.execute("SELECT * FROM outputs WHERE generation_id = ? AND serial = ?", (generation_id, int(serial))).fetchone()
+            if row is None:
+                return None
+            if row["removed_at"] is None:
+                self.db.execute("UPDATE outputs SET removed_at = ? WHERE generation_id = ?", (now_utc(), generation_id))
+            return self.output(generation_id)
+
+    def offered(self, generation_id: str) -> bool:
+        """Whether a piece may be offered to the public: released, its model not withdrawn, not removed by its maker."""
+        row = self.db.execute("SELECT withdrawn, removed_at FROM outputs WHERE generation_id = ?", (generation_id,)).fetchone()
+        return bool(row) and not row["withdrawn"] and row["removed_at"] is None
+
     def output(self, generation_id: str) -> dict | None:
         row = self.db.execute("SELECT * FROM outputs WHERE generation_id = ?", (generation_id,)).fetchone()
         return dict(row) if row else None
@@ -103,28 +132,26 @@ class Index:
         return int(self.db.execute("SELECT COUNT(*) FROM outputs").fetchone()[0])
 
     def _candidates(self, phases: list, payload: int | None) -> dict:
-        """The outputs sharing hashes with the query, by generation id, with their stored landmarks; the bucket first."""
+        """The outputs sharing hashes with the query, by generation id, with the landmarks that share them: a vote
+        only ever comes from a shared hash, so the rest of a candidate's landmarks are never read. The bucket first;
+        a withdrawn model's pieces never."""
         hashes = sorted({h for q in phases for h, _ in q})
         if not hashes:
             return {}
-        counts: dict = {}
+        rows: dict = {}
         for i in range(0, len(hashes), 900):
             chunk = hashes[i:i + 900]
-            q = "SELECT f.generation_id AS g, COUNT(*) AS n FROM fingerprints f"
+            marks = ",".join("?" * len(chunk))
+            q = ("SELECT f.generation_id AS g, f.hash AS h, f.offset_ms AS o FROM fingerprints f"
+                 " JOIN outputs ou ON ou.generation_id = f.generation_id WHERE ou.withdrawn = 0 AND f.hash IN (%s)" % marks)
             params: list = list(chunk)
             if payload is not None:
-                q += " JOIN outputs o ON o.generation_id = f.generation_id WHERE o.payload = ? AND f.hash IN (%s)" % ",".join("?" * len(chunk))
-                params = [payload] + params
-            else:
-                q += " WHERE f.hash IN (%s)" % ",".join("?" * len(chunk))
-            q += " GROUP BY f.generation_id"
+                q += " AND ou.payload = ?"
+                params.append(payload)
             for row in self.db.execute(q, params):
-                counts[row["g"]] = counts.get(row["g"], 0) + row["n"]
-        top = sorted(counts, key=counts.get, reverse=True)[:CANDIDATES]
-        out = {}
-        for g in top:
-            out[g] = [(r["hash"], r["offset_ms"]) for r in self.db.execute("SELECT hash, offset_ms FROM fingerprints WHERE generation_id = ?", (g,))]
-        return out
+                rows.setdefault(row["g"], []).append((row["h"], row["o"]))
+        top = sorted(rows, key=lambda g: len(rows[g]), reverse=True)[:CANDIDATES]
+        return {g: rows[g] for g in top}
 
     def verify(self, phases: list, payload: int | None) -> dict:
         """The three grades: a named output; a watermark alone narrowing to a bucket; nothing."""
@@ -148,19 +175,20 @@ class Index:
         """Every claim the query confidently matches, strongest first: (votes, claim row). Confidence is read against
         the shorter of the two, so a short claimed track inside a long medley matches either way round."""
         hashes = sorted({h for q in phases for h, _ in q})
-        counts: dict = {}
+        rows: dict = {}
         for i in range(0, len(hashes), 900):
             chunk = hashes[i:i + 900]
-            q = "SELECT claim_id AS c, COUNT(*) AS n FROM claim_fingerprints WHERE hash IN (%s) GROUP BY claim_id" % ",".join("?" * len(chunk))
+            q = "SELECT claim_id AS c, hash AS h, offset_ms AS o FROM claim_fingerprints WHERE hash IN (%s)" % ",".join("?" * len(chunk))
             for row in self.db.execute(q, chunk):
-                counts[row["c"]] = counts.get(row["c"], 0) + row["n"]
+                rows.setdefault(row["c"], []).append((row["h"], row["o"]))
         query_len = len(phases[0]) if phases else 0
         out = []
-        for c in sorted(counts, key=counts.get, reverse=True)[:CANDIDATES]:
-            fps = [(r["hash"], r["offset_ms"]) for r in self.db.execute("SELECT hash, offset_ms FROM claim_fingerprints WHERE claim_id = ?", (c,))]
-            votes, distinct = best_phase_stats(phases, fps)
-            if is_confident(votes, min(query_len, len(fps)), distinct):
-                out.append((votes, dict(self.db.execute("SELECT * FROM claims WHERE claim_id = ?", (c,)).fetchone())))
+        for c in sorted(rows, key=lambda c: len(rows[c]), reverse=True)[:CANDIDATES]:
+            claim = dict(self.db.execute("SELECT * FROM claims WHERE claim_id = ?", (c,)).fetchone())
+            votes, distinct = best_phase_stats(phases, rows[c])
+            # The shared rows vote; confidence still reads against the claim's whole fingerprint, as stored.
+            if is_confident(votes, min(query_len, int(claim["landmarks"])), distinct):
+                out.append((votes, claim))
         out.sort(key=lambda m: m[0], reverse=True)
         return out
 
@@ -184,11 +212,15 @@ class Index:
         of models; one another account also claims is linked to that claim, so both models' pages say it is shared."""
         rows = _landmarks(fingerprint)
         query = [_landmarks(p) for p in phases] if phases else [rows]
+        have = self.db.execute("SELECT * FROM claims WHERE serial = ? AND track_id = ?", (serial, track_id)).fetchone()
+        if have:
+            return {"claimed": True, "claim_ref": have["claim_id"], "already": True}
+        # Matching reads for seconds; it runs before the lock so the releases and verifies behind it do not wait.
+        others = [(v, c) for v, c in self._claim_matches(query) if c["account_id"] != account_id]
         with self._lock:
             have = self.db.execute("SELECT * FROM claims WHERE serial = ? AND track_id = ?", (serial, track_id)).fetchone()
             if have:
                 return {"claimed": True, "claim_ref": have["claim_id"], "already": True}
-            others = [(v, c) for v, c in self._claim_matches(query) if c["account_id"] != account_id]
             self.db.execute("BEGIN IMMEDIATE")
             try:
                 cur = self.db.execute("INSERT INTO claims (account_id, serial, track_id, declaration, claimed_at, claimed_by, landmarks)"
@@ -227,6 +259,14 @@ class Index:
             "SELECT COUNT(DISTINCT c.claim_id) FROM claims c JOIN claim_shares s ON s.claim_id = c.claim_id OR s.other_claim = c.claim_id"
             " WHERE c.serial = ?", (serial,)).fetchone()[0])
         return {"claimed": claimed, "shared": shared}
+
+
+def phases_of(value) -> list:
+    """A query's phases as the index takes them: at most MAX_PHASES lists of at most MAX_LANDMARKS [hash, offset_ms]
+    each, so no body can cost more matching than a real query. ValueError says what is wrong."""
+    if not isinstance(value, list) or not value or len(value) > MAX_PHASES or not all(isinstance(p, list) for p in value):
+        raise ValueError(f"phases is 1 to {MAX_PHASES} lists of landmarks")
+    return [_landmarks(p) for p in value]
 
 
 def _landmarks(fingerprint) -> list:

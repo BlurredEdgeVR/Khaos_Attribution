@@ -1,7 +1,7 @@
 """What a prompt may ask for: the sound, never another artist. A request that names a real artist or singer to imitate
 ("in the style of X", "sounds like X", "X's voice", "X type beat") or a work to reproduce ("a cover of X") is refused in
-both rooms; the model's own artist may be named. A capitalised word counts as a name only when it is not a genre, a
-place, an era, an instrument or an occasion, so a person named in lowercase can slip through: a guard, not a filter.
+both rooms; the model's own artist may be named. A capitalised run counts as a name unless every word of it is a genre,
+a place, an era, an instrument or an occasion, so a person named in lowercase can slip through: a guard, not a filter.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ import re
 IMITATION_REFUSED = ("Describe the sound you want, not another artist: Khaos makes music only in the voice of the artist "
                      "whose model this is. Refused: {hits}.")
 
-# Words that are never someone to imitate: genres, places and peoples, eras, instruments and gear, occasions.
+# Words that are never someone to imitate: genres, places and peoples, eras, instruments and gear, occasions, roles.
 NON_NAMES = frozenset("""
 afrobeat afrobeats afro ambient americana amapiano arabic baroque bebop bhangra big bluegrass blues bollywood bossa
 breakbeat britpop broadway calypso celtic chamber chillwave chiptune christmas classical country cumbia dancehall
@@ -29,7 +29,11 @@ scottish spanish swedish texas tokyo turkish vienna welsh
 808 909 303 tr-808 tr-909 tb-303 rhodes wurlitzer hammond moog juno prophet mellotron fender gibson les stratocaster
 telecaster rickenbacker marshall vox steinway yamaha roland korg arp oberheim minimoog linn mpc sp-1200 theremin
 strings
-god christmas easter halloween valentine diwali ramadan advent hanukkah sunday
+god christmas easter halloween valentine diwali ramadan advent hanukkah
+monday tuesday wednesday thursday friday saturday sunday january february march april may june july august september
+october november december spring summer autumn fall winter morning evening midnight
+dj band group artist composer producer singer rapper choir orchestra trio quartet quintet ensemble drummer guitarist
+pianist bassist vocalist crooner
 """.split())
 _NAME = r"(?P<name>[A-Z0-9][\w'’.&-]*(?:\s+[A-Z0-9][\w'’.&-]*){0,3})"
 _ARTICLE = r"(?:(?i:a|an|the)\s+)?"
@@ -39,11 +43,13 @@ _TRIGGERS = (r"in\s+the\s+(?:style|vein|manner|spirit|voice)\s+of|(?:the\s+)?(?:
              r"|(?:similar|comparable|akin)\s+to|(?:à|a)\s+la|inspired\s+by|influenced\s+by|styled\s+after"
              r"|featuring|feat\.|ft\.|(?:cover|remake|version|remix|copy)\s+of"
              r"|imitat(?:e|es|ing|ion\s+of)|impersonat(?:e|es|ing|ion\s+of)|mimic(?:s|king)?|emulat(?:e|es|ing)"
-             r"|channel(?:s|ing|ling)?|(?:by|from|like)\s+(?:the\s+)?(?:band|group|artist|composer|producer|singer|rapper|dj)")
+             r"|channel(?:s|ing|ling)?|(?:by|from|like)\s+(?:the\s+)?(?:band|group|artist|composer|producer|singer|rapper|dj)"
+             r"|like")
 _PATTERNS = [
     re.compile(r"\b(?i:" + _TRIGGERS + r")\s+" + _ARTICLE + _NAME),
     re.compile(_NAME + r"(?i:'s|’s)\s+(?i:voice|vocals?|style|sound|singing|flow)\b"),
-    re.compile(_NAME + r"(?i:-style|\s+style|\s+type\s+beat)\b"),
+    re.compile(_NAME + r"(?i:-style|\s+style|\s+type\s+beat|-like|-esque|\s+vibes?|\s+energy)\b"),
+    re.compile(_NAME + r"\s+(?i:would|might|could)\s+(?i:play|sing|write|make|do|produce)\b"),
     re.compile(r"\b(?i:with)\s+" + _NAME + r"\s+(?i:vocals?|on\s+vocals)\b"),
 ]
 
@@ -62,7 +68,8 @@ def _is_description(name: str) -> bool:
     words = _norm(name).split()
     while words and words[0] in ("a", "an", "the"):
         words = words[1:]
-    return not words or words[0] in NON_NAMES or any(w in _FUNCTION for w in words)
+    # A run of description words is a description ("New Order" is a name; "New Orleans Jazz" is not).
+    return not words or all(w in NON_NAMES for w in words) or any(w in _FUNCTION for w in words)
 
 
 def imitation_hits(prompt: str, allowed: tuple[str, ...] | list[str] = ()) -> list[str]:

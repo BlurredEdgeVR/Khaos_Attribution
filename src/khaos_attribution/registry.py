@@ -12,6 +12,7 @@ import json
 import os
 import base64
 import secrets
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -262,16 +263,33 @@ def countersignature_valid(counter: dict, record_sha256: str, register_public_pe
 
 # ---- the outbox ----
 
+_OUTBOX_LOCKS: dict = {}
+_OUTBOX_LOCKS_GUARD = threading.Lock()
+
+
+def _outbox_lock(directory: Path) -> threading.Lock:
+    """One lock per outbox folder in this process: the rooms append from request threads and background workers,
+    and the sequence number is read from the folder."""
+    key = str(Path(directory).resolve())
+    with _OUTBOX_LOCKS_GUARD:
+        return _OUTBOX_LOCKS.setdefault(key, threading.Lock())
+
+
 class Outbox:
     """Records a machine made while offline, kept in order until the register has taken each one."""
 
     def __init__(self, root: Path):
         self.dir = Path(root) / OUTBOX_DIR
         self.dir.mkdir(parents=True, exist_ok=True)
+        self._lock = _outbox_lock(self.dir)
 
     def append(self, kind: str, body: dict) -> str:
         entry = {"kind": kind, "body": body, "created_at": time.time()}
         entry_id = sha256_hex(canonical_bytes({"kind": kind, "body": body}))
+        with self._lock:
+            return self._append_locked(kind, entry, entry_id)
+
+    def _append_locked(self, kind: str, entry: dict, entry_id: str) -> str:
         existing = sorted(self.dir.glob("*.json")) + sorted((self.dir / "sent").glob("*.json"))
         if any(p.name.endswith(f"-{entry_id[:12]}.json") for p in existing):
             return entry_id   # the same record twice is one entry
@@ -293,8 +311,13 @@ class Outbox:
         (marks / sha256_hex(key.encode("utf-8"))).write_bytes(b"")
 
     def pending(self) -> list:
+        """Entries still to send. One also in `sent/` was taken and its move interrupted: it is finished, not resent."""
+        sent = {p.name for p in (self.dir / "sent").glob("*.json")}
         out = []
         for p in sorted(self.dir.glob("*.json")):
+            if p.name in sent:
+                p.unlink(missing_ok=True)
+                continue
             try:
                 out.append((p, json.loads(p.read_text(encoding="utf-8"))))
             except (OSError, ValueError):
@@ -413,6 +436,10 @@ class RegisterClient:
             body["manifest"] = manifest if isinstance(manifest, str) else base64.b64encode(manifest).decode()
         return self._post("/api/outputs", body)
 
+    def remove_output(self, generation_id: str, nonce: str | None = None) -> dict:
+        """A released piece its maker took down; only the machine that released it may say so."""
+        return self._post("/api/outputs/remove", {"generation_id": generation_id, "nonce": nonce or secrets.token_hex(8)})
+
     def claim(self, record_sha256: str, track_id: str, fingerprint: list | None = None, declaration: str = "",
               nonce: str | None = None, phases: list | None = None) -> dict:
         """A registered model's training track, claimed on the account's declaration; a recording may train many models.
@@ -457,6 +484,7 @@ class RegisterClient:
             try:
                 answer = {"publish": self.publish, "withdraw": lambda b: self.withdraw(**b),
                           "served": lambda b: self.served(**b), "release": lambda b: self.release(**b),
+                          "remove_output": lambda b: self.remove_output(**b),
                           "claim": lambda b: self.claim(**b)}[kind](body)
             except RegisterError as e:
                 # Not enrolled, a replay of another body, too many calls this minute, or the register itself failing:

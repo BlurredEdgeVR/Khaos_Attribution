@@ -179,6 +179,11 @@ echo "== caddy site"
 cat > /etc/caddy/Caddyfile <<CADDY
 $DOMAIN {
 	encode zstd gzip
+	# A twelve-minute track's four-phase claim runs to about 13 MB; the code's own cap is 24 MB.
+	@claims path /api/claims /api/claims/check
+	request_body @claims {
+		max_size 25MB
+	}
 	request_body {
 		max_size 10MB
 	}

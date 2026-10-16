@@ -350,3 +350,51 @@ def test_the_model_page_states_what_trained_the_model_and_how_it_was_declared(re
     bad["training_set"]["data_kinds"] = ["", 3]
     problems = RG.record_problems(bad)
     assert any("declaration" in p for p in problems) and any("data_kinds" in p for p in problems)
+
+
+def test_the_bucket_is_a_column_filled_for_older_records_and_withdrawn_ones_are_not_served(register, tmp_path):
+    """A bucket lookup reads an indexed column; a file from before the column is filled on open; a withdrawn model
+    is neither in its bucket nor accepted as serving."""
+    app, store, http = register
+    key, client = _machine(register, "artist-one")
+    signed = _signed(key)
+    serial = client.publish(signed)["serial"]
+    payload = signed["record"]["model"]["watermark_payload"]
+    assert store.serials_in_bucket(payload) == [serial]
+    store.db.execute("UPDATE records SET payload = NULL")
+    assert store.serials_in_bucket(payload) == []
+    from register_service.store import Store
+    again = Store(store.path)
+    assert again.serials_in_bucket(payload) == [serial], "the column is filled on open"
+    _, space = _machine(register, "artist-two", role="space")
+    client.withdraw(serial, "x")
+    assert store.serials_in_bucket(payload) == []
+    with pytest.raises(R.RegisterError, match="withdrawn"):
+        space.served(serial, "https://space.example", "serving")
+    assert space.served(serial, "https://space.example", "removed")["state"] == "removed"
+
+
+def test_a_failed_write_leaves_nothing_behind(register, monkeypatch):
+    """Every store write is one transaction: a failure half-way undoes its earlier statements."""
+    app, store, http = register
+    from register_service import store as S
+    original = S.Store._ledger
+
+    def broken(self, *a, **k):
+        raise RuntimeError("the ledger write failed")
+    monkeypatch.setattr(S.Store, "_ledger", broken)
+    before = len(store.db.execute("SELECT * FROM accounts").fetchall())
+    with pytest.raises(RuntimeError):
+        store.create_account("half")
+    assert len(store.db.execute("SELECT * FROM accounts").fetchall()) == before
+    monkeypatch.setattr(S.Store, "_ledger", original)
+    assert store.ledger_ok()
+
+
+def test_the_public_pages_read_the_ledger_check_at_most_once_a_minute(register):
+    _, store, http = register
+    first = store.ledger_status()
+    store.db.execute("UPDATE ledger SET detail_json = '{\"x\": 1}' WHERE seq = 1")
+    assert store.ledger_status()["checked_at_utc"] == first["checked_at_utc"], "within the minute, the last reading"
+    assert store.ledger_ok() is False, "the real check is always whole"
+    assert store.ledger_status(max_age_s=0)["ok"] is False

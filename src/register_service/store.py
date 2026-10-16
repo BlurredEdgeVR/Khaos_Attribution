@@ -8,6 +8,8 @@ import json
 import secrets
 import sqlite3
 import threading
+import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -34,6 +36,10 @@ CREATE TABLE IF NOT EXISTS ledger (seq INTEGER PRIMARY KEY, kind TEXT NOT NULL, 
 ROLES = ("workshop", "space")
 
 
+def _payload_of(signed: dict) -> int:
+    return int(signed["record"]["model"]["watermark_payload"])
+
+
 def now_utc() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
@@ -46,6 +52,35 @@ class Store:
         self._local = threading.local()
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.executescript(SCHEMA)
+        self._ledger_status = None
+        self._add_payload_column()
+
+    def _add_payload_column(self) -> None:
+        """The watermark bucket as its own indexed column, so a bucket lookup never parses every record."""
+        columns = {r["name"] for r in self.db.execute("PRAGMA table_info(records)")}
+        if "payload" not in columns:
+            self.db.execute("ALTER TABLE records ADD COLUMN payload INTEGER")
+        self.db.execute("CREATE INDEX IF NOT EXISTS records_payload ON records (payload)")
+        rows = self.db.execute("SELECT serial, signed_json FROM records WHERE payload IS NULL").fetchall()
+        for row in rows:
+            try:
+                payload = _payload_of(json.loads(row["signed_json"]))
+            except (KeyError, TypeError, ValueError):
+                continue
+            self.db.execute("UPDATE records SET payload = ? WHERE serial = ?", (payload, row["serial"]))
+
+    @contextmanager
+    def _tx(self):
+        """One write transaction under the lock. The connection autocommits, so `with conn:` alone opens nothing and a
+        failure half-way would leave its earlier statements in; the lock keeps the ledger chain in order."""
+        with self._lock:
+            self.db.execute("BEGIN IMMEDIATE")
+            try:
+                yield self.db
+                self.db.execute("COMMIT")
+            except BaseException:
+                self.db.execute("ROLLBACK")
+                raise
 
     @property
     def db(self) -> sqlite3.Connection:
@@ -61,7 +96,7 @@ class Store:
     # ---- accounts and invites (the operator's, by command line) ----
 
     def create_account(self, name: str) -> int:
-        with self._lock, self.db:
+        with self._tx():
             cur = self.db.execute("INSERT INTO accounts (name, created_at) VALUES (?, ?)", (name, now_utc()))
             self._ledger("account", None, None, None, {"account": name})
             return cur.lastrowid
@@ -70,7 +105,7 @@ class Store:
         """An invite fixes the role the machine will have: a Workshop publishes and withdraws; a Space reports serving."""
         if role not in ROLES:
             raise ValueError(f"role is one of {ROLES}")
-        with self._lock, self.db:
+        with self._tx():
             row = self.db.execute("SELECT id FROM accounts WHERE name = ?", (account_name,)).fetchone()
             if not row:
                 raise KeyError(f"no account {account_name!r}")
@@ -81,7 +116,7 @@ class Store:
     # ---- machines ----
 
     def enrol(self, invite: str, key_id: str, name: str, public_pem: str) -> dict:
-        with self._lock, self.db:
+        with self._tx():
             inv = self.db.execute("SELECT * FROM invites WHERE code = ?", (invite,)).fetchone()
             if not inv or inv["used_by"]:
                 raise PermissionError("the invite is unknown or already used")
@@ -110,7 +145,7 @@ class Store:
         return json.loads(row["answer_json"]) if row["answer_json"] else {"taken": True}
 
     def record_nonce(self, key_id: str, nonce: str, body_sha256: str, answer: dict) -> None:
-        with self._lock, self.db:
+        with self._tx():
             self.db.execute("INSERT OR REPLACE INTO nonces (key_id, nonce, body_sha256, answer_json, at) VALUES (?, ?, ?, ?, ?)",
                             (key_id, nonce, body_sha256, json.dumps(answer, sort_keys=True), now_utc()))
 
@@ -119,7 +154,7 @@ class Store:
         return dict(row) if row else None
 
     def revoke_machine(self, key_id: str, reason: str) -> None:
-        with self._lock, self.db:
+        with self._tx():
             self.db.execute("UPDATE machines SET revoked_at = ? WHERE key_id = ?", (now_utc(), key_id))
             self._ledger("revoke", None, None, key_id, {"reason": reason})
 
@@ -131,27 +166,20 @@ class Store:
 
     def register(self, signed: dict, machine_key_id: str, account_id: int, countersign) -> tuple:
         """The next serial, the countersignature and the row, as one transaction: (serial, counter, already)."""
-        with self._lock:
-            self.db.execute("BEGIN IMMEDIATE")
-            try:
-                have = self.db.execute("SELECT serial, counter_json FROM records WHERE record_sha256 = ?",
-                                       (signed["record_sha256"],)).fetchone()
-                if have:
-                    self.db.execute("COMMIT")
-                    return have["serial"], json.loads(have["counter_json"]), True
-                serial = self._next_serial()
-                counter = countersign(serial)
-                self.db.execute(
-                    "INSERT INTO records (serial, record_sha256, machine_key_id, account_id, signed_json, counter_json, state, published_at)"
-                    " VALUES (?, ?, ?, ?, ?, ?, 'registered', ?)",
-                    (serial, signed["record_sha256"], machine_key_id, account_id, json.dumps(signed, sort_keys=True),
-                     json.dumps(counter, sort_keys=True), counter["countersigned_at_utc"]))
-                self._ledger("publish", serial, signed["record_sha256"], machine_key_id,
-                             {"artist_id": signed["record"]["artist_id"], "public_view": signed["record"]["public_view"]})
-                self.db.execute("COMMIT")
-            except BaseException:
-                self.db.execute("ROLLBACK")
-                raise
+        with self._tx():
+            have = self.db.execute("SELECT serial, counter_json FROM records WHERE record_sha256 = ?",
+                                   (signed["record_sha256"],)).fetchone()
+            if have:
+                return have["serial"], json.loads(have["counter_json"]), True
+            serial = self._next_serial()
+            counter = countersign(serial)
+            self.db.execute(
+                "INSERT INTO records (serial, record_sha256, machine_key_id, account_id, signed_json, counter_json, state,"
+                " published_at, payload) VALUES (?, ?, ?, ?, ?, ?, 'registered', ?, ?)",
+                (serial, signed["record_sha256"], machine_key_id, account_id, json.dumps(signed, sort_keys=True),
+                 json.dumps(counter, sort_keys=True), counter["countersigned_at_utc"], _payload_of(signed)))
+            self._ledger("publish", serial, signed["record_sha256"], machine_key_id,
+                         {"artist_id": signed["record"]["artist_id"], "public_view": signed["record"]["public_view"]})
             return serial, counter, False
 
     def record(self, serial: int) -> dict | None:
@@ -171,7 +199,7 @@ class Store:
         return int(row["serial"]) if row else None
 
     def withdraw(self, serial: int, key_id: str, reason: str) -> dict:
-        with self._lock, self.db:
+        with self._tx():
             row = self.db.execute("SELECT * FROM records WHERE serial = ?", (serial,)).fetchone()
             if not row:
                 raise KeyError(f"no record {serial}")
@@ -187,7 +215,7 @@ class Store:
             return {"serial": serial, "state": "withdrawn", "withdrawn_at": at}
 
     def served(self, serial: int, key_id: str, space_url: str, state: str) -> dict:
-        with self._lock, self.db:
+        with self._tx():
             mach = self.machine(key_id)
             if not mach or mach["role"] != "space":
                 raise PermissionError("only an enrolled Space reports where a model is served")
@@ -203,14 +231,8 @@ class Store:
 
     def serials_in_bucket(self, payload: int) -> list:
         """Every registered, not withdrawn model whose watermark bucket is this one."""
-        out = []
-        for row in self.db.execute("SELECT serial, signed_json FROM records WHERE state != 'withdrawn' ORDER BY serial"):
-            try:
-                if int(json.loads(row["signed_json"])["record"]["model"]["watermark_payload"]) == payload:
-                    out.append(row["serial"])
-            except (KeyError, TypeError, ValueError):
-                continue
-        return out
+        return [r["serial"] for r in self.db.execute(
+            "SELECT serial FROM records WHERE payload = ? AND state != 'withdrawn' ORDER BY serial", (int(payload),))]
 
     def withdrawn_serials(self) -> list:
         return [r["serial"] for r in self.db.execute("SELECT serial FROM records WHERE state = 'withdrawn' ORDER BY serial")]
@@ -220,7 +242,7 @@ class Store:
 
     def record_key(self, key_id: str, public_pem: str, present: list, note: str = "") -> None:
         """The ceremony's entry: which key countersigns from now on, and who was there when it was made."""
-        with self.db:
+        with self._tx():
             self._ledger("key", None, None, key_id, {"public_key_sha256": sha256_hex(public_pem.encode("utf-8")),
                                                      "present": [str(p)[:80] for p in present][:12], "note": note[:400]})
 
@@ -247,7 +269,8 @@ class Store:
         return out
 
     def ledger_ok(self) -> bool:
-        """Every entry's hash is over its own body and names the entry before it: the chain is unbroken."""
+        """Every entry's hash is over its own body and names the entry before it: the chain is unbroken. Always the
+        whole chain: a remembered tip would miss an entry changed behind it."""
         prev = None
         for e in self.ledger():
             body = {"kind": e["kind"], "serial": e["serial"], "record_sha256": e["record_sha256"], "key_id": e["key_id"],
@@ -256,3 +279,12 @@ class Store:
                 return False
             prev = e["entry_sha256"]
         return True
+
+    def ledger_status(self, max_age_s: float = 60.0) -> dict:
+        """The public pages' reading: the last whole check, repeated at most once a minute, since those pages take
+        unlimited calls and the chain grows."""
+        now = time.monotonic()
+        held = self._ledger_status
+        if held is None or now - held["at"] > max_age_s:
+            self._ledger_status = held = {"ok": self.ledger_ok(), "at": now, "checked_at_utc": now_utc()}
+        return {"ok": held["ok"], "checked_at_utc": held["checked_at_utc"]}

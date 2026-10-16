@@ -24,6 +24,8 @@ WATERMARK_THRESHOLD = 0.5
 REGISTER_TIMEOUT_S = 20.0
 # A small compressed file can decode to hours of audio; nothing longer than this is decoded for a check.
 MAX_VERIFY_SECONDS = 20 * 60
+# The Guild Register anyone may ask; a verifier needs no enrolment to ask it.
+REGISTER_PUBLIC_URL = "https://register.khaos.dev"
 
 VERDICTS = {
     "confirmed": "Khaos origin confirmed: the audio matches a released Khaos output.",

@@ -119,3 +119,20 @@ def test_is_signed_is_false_for_a_broken_signature(tmp_path):
     data[60] ^= 0xFF
     wav.write_bytes(bytes(data))
     assert not C.is_signed(wav) and not C.is_signed(_wav(tmp_path / "plain.wav"))
+
+
+def test_a_signed_file_keeps_its_permissions_and_off_is_read_in_any_case(tmp_path, monkeypatch):
+    import os
+    import stat
+    import wave
+    from khaos_attribution import credentials as C
+    wav = tmp_path / "p.wav"
+    with wave.open(str(wav), "wb") as fh:
+        fh.setnchannels(1); fh.setsampwidth(2); fh.setframerate(8000); fh.writeframes(b"\x00\x00" * 8000)
+    os.chmod(wav, 0o644)
+    ident = C.load_identity(tmp_path / "id", product="Khaos Test", subject_id="t")
+    C.sign_file(wav, {"generation_id": "g", "watermark_id": 59368}, ident, product="Khaos Test", version="0", timestamp_url=None)
+    assert stat.S_IMODE(wav.stat().st_mode) == 0o644
+    for value in ("off", "OFF", "none", ""):
+        monkeypatch.setenv("KHAOS_TSA_URL", value)
+        assert C.tsa_url() is None, value

@@ -20,13 +20,15 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from starlette.concurrency import run_in_threadpool
 
 from khaos_attribution.watermark import decode_codeword
+from register_service.index import phases_of
 
 PREFIX = "/c2pa/v1"
 FINGERPRINT_ALG = "dev.khaos.landmarks.1"
 WATERMARK_ALG = "dev.khaos.audioseal-bucket.1"
 # The register's front door (Caddy) takes 10 MB a request: a minute of WAV, ten of MP3, and a short clip is enough.
 CONTENT_MAX_BYTES = 10_000_000
-CONTENT_MAX_SECONDS = 15 * 60
+# A clip is enough to name a piece, and the peak finder holds several times the decoded audio in memory.
+CONTENT_MAX_SECONDS = 120
 # A small file can still describe hours of many-channel audio; what is decoded is bounded, whatever the file claims.
 DECODE_BUDGET_BYTES = 200_000_000
 MAX_RATE = 96_000
@@ -56,9 +58,9 @@ def _phases(value: str) -> list:
     if isinstance(data, list) and data and all(isinstance(x, list) and len(x) == 2 and not isinstance(x[0], list) for x in data):
         data = [data]
     try:
-        return [[(int(h), int(o)) for h, o in phase] for phase in data]
-    except (TypeError, ValueError):
-        raise HTTPException(400, "a fingerprint is a list of [hash, offset_ms]") from None
+        return phases_of(data)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from None
 
 
 def _hint_payload(hint_alg: str | None, hint_value: str | None) -> int | None:
@@ -111,14 +113,8 @@ def _max_results(n: int | None) -> int:
     return n or 10
 
 
-def add_routes(app: FastAPI, index, store, public_url: str) -> None:
+def add_routes(app: FastAPI, index, public_url: str) -> None:
     endpoint = public_url.rstrip("/") + PREFIX
-
-    def withdrawn(generation_id: str) -> bool:
-        """A withdrawn model's pieces are not offered: its owner took it out of the register."""
-        out = index.output(generation_id)
-        rec = store.record(int(out["serial"])) if out else None
-        return bool(rec) and rec["state"] == "withdrawn"
 
     def matches(phases: list, payload: int | None, max_results: int) -> dict:
         """The released piece the fingerprint names, when its manifest is held; never a guess."""
@@ -126,7 +122,7 @@ def add_routes(app: FastAPI, index, store, public_url: str) -> None:
         if answer["grade"] != "output" or max_results < 1:
             return {"matches": []}
         gid = answer["output"]["generation_id"]
-        if not index.has_manifest(gid) or withdrawn(gid):
+        if not index.has_manifest(gid) or not index.offered(gid):
             return {"matches": []}
         query = max(1, len(phases[0]) if phases else 1)
         return {"matches": [{"manifestId": gid, "endpoint": endpoint,
@@ -198,6 +194,6 @@ def add_routes(app: FastAPI, index, store, public_url: str) -> None:
         held = await run_in_threadpool(index.manifest, manifest_id)
         if held is None:
             raise HTTPException(404, "no manifest is held for that id")
-        if await run_in_threadpool(withdrawn, manifest_id):
-            raise HTTPException(410, "the model that made this piece was withdrawn from the register")
+        if not await run_in_threadpool(index.offered, manifest_id):
+            raise HTTPException(410, "this piece is no longer offered: its model was withdrawn or its maker took it down")
         return Response(content=held, media_type="application/c2pa")

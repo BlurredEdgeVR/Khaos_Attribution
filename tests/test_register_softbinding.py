@@ -146,3 +146,31 @@ def test_a_small_file_describing_huge_audio_is_refused_before_it_is_decoded(regi
     assert got.status_code == 415 and "96 kHz" in got.json()["detail"]
     assert http.post(f"{SB.PREFIX}/matches/byContent", content=b"x" * (SB.CONTENT_MAX_BYTES + 1),
                      headers={"Content-Type": "audio/wav"}).status_code == 413
+
+
+def test_a_piece_its_maker_removed_is_named_but_no_longer_offered(register, tmp_path):
+    """Removal keeps the fingerprint, so a copy found later is still named, with the fact; the lookup stops offering."""
+    _, _, http = register
+    signed, serial, audio, sr, manifest, out, client = _released(register, tmp_path)
+    clip = _wav_bytes(_clip(audio, sr, 3.0, 5.0), sr)
+    assert http.post(f"{SB.PREFIX}/matches/byContent", content=clip, headers={"Content-Type": "audio/wav"}).json()["matches"]
+    _, stranger = _machine(register, "artist-two")
+    with pytest.raises(Exception, match="released"):
+        stranger.remove_output("gen-1")
+    gone = client.remove_output("gen-1")
+    assert gone["serial"] == serial and gone["removed_at"]
+    assert client.remove_output("gen-1")["removed_at"] == gone["removed_at"], "removing twice is once"
+    answer = client.verify(query_phases(_clip(audio, sr, 3.0, 5.0), sr), None)
+    assert answer["grade"] == "output" and answer["removed_at"] == gone["removed_at"]
+    assert http.post(f"{SB.PREFIX}/matches/byContent", content=clip, headers={"Content-Type": "audio/wav"}).json() == {"matches": []}
+    assert http.get(f"{SB.PREFIX}/manifests/gen-1").status_code == 410
+
+
+def test_a_query_is_bounded_in_phases_and_landmarks(register, tmp_path):
+    """No body may cost more matching than a real query: at most eight phases, each at most the landmark cap."""
+    _, _, http = register
+    _released(register, tmp_path)
+    too_many = [[[1, 0]]] * 9
+    assert http.post("/api/verify", json={"phases": too_many}).status_code == 422
+    value = base64.b64encode(json.dumps(too_many).encode()).decode()
+    assert http.post(f"{SB.PREFIX}/matches/byBinding", json={"alg": SB.FINGERPRINT_ALG, "value": value}).status_code == 400
