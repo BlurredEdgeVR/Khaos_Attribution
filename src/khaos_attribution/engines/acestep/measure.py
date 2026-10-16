@@ -5,6 +5,7 @@ score, and gradient checkpointing on the decoder's layers. Both rooms read these
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any
 
 from khaos_attribution.engines.acestep import DESCRIPTOR
@@ -26,8 +27,9 @@ LOW_MEMORY_OVERRIDE_ENV = "KHAOS_INFLUENCE_LOW_MEMORY"
 
 __all__ = ["ENGINE_RESIDENT_GB", "ENGINE_YIELDED_GB", "LOW_MEMORY_OVERRIDE_ENV", "SCORER_BASE_GB",
            "SCORER_CHECKPOINTED_GB", "SCORER_CHECKPOINTED_GB_PER_SEC", "SCORER_GB_PER_SEC", "SCORER_PROCESS_GB",
-           "SYSTEM_RESERVE_GB", "enable_checkpointing", "flush_accelerator", "machine_memory_gb", "memory_plan",
-           "physical_memory_gb", "scorer_need_gb"]
+           "SYSTEM_RESERVE_GB", "enable_checkpointing", "flush_accelerator", "index_rows", "machine_memory_gb",
+           "memory_plan", "output_feature", "output_loss", "paired_loss", "parameter_count", "physical_memory_gb",
+           "scorer_need_gb"]
 
 
 def physical_memory_gb() -> float | None:
@@ -108,3 +110,50 @@ def enable_checkpointing(module: Any) -> int:
         layer._gradient_checkpointing_func = partial(checkpoint, **kwargs)
         n += 1
     return n
+
+
+# ── the features: ACE-Step's live module through the contract's gradient maths ───────────────────────────────────
+
+def index_rows(handle: Any, files, *, projection, timesteps, noise_seed: int, target: str = "vnorm",
+               timestep_norm: bool = False, on_row=None) -> tuple:
+    """(matrix, rows) of an index: one L2-normalised projected gradient per pair file, in file order, with each
+    row's pre-normalisation norm kept so a zero-gradient pair stays visible."""
+    import numpy as np  # noqa: PLC0415
+    from khaos_attribution import gradient as G  # noqa: PLC0415
+    params = G.adapter_parameters(handle)
+    rows, vectors = [], []
+    for i, path in enumerate(files):
+        path = Path(path)
+        flat = G.pair_gradient(handle, G.load_sample(path), timesteps=timesteps, target=target,
+                               noise_seed=G.pair_noise_seed(noise_seed, path.name), params=params,
+                               timestep_norm=timestep_norm)
+        projected = G.project(flat, projection)
+        norm = float(np.linalg.norm(projected))
+        vectors.append(G.l2_normalise(projected))
+        rows.append({"row": i, "pair_id": path.stem, "track_id": G.track_of_pair(path.stem), "gradient_norm": round(norm, 8)})
+        if on_row is not None:
+            on_row(i, path, norm)
+    matrix = np.stack(vectors).astype(np.float32) if vectors else np.zeros((0, projection.dim), np.float32)
+    return matrix, rows
+
+
+def output_feature(handle: Any, index_meta: dict, files) -> Any:
+    from khaos_attribution import gradient as G  # noqa: PLC0415
+    return G.output_feature(handle, index_meta, list(files))
+
+
+def output_loss(handle: Any, index_meta: dict, files) -> float:
+    from khaos_attribution import gradient as G  # noqa: PLC0415
+    return G.output_loss(handle, index_meta, list(files))
+
+
+def paired_loss(handle: Any, index_meta: dict, files) -> dict:
+    from khaos_attribution import gradient as G  # noqa: PLC0415
+    return G.paired_loss(handle, index_meta, list(files))
+
+
+def parameter_count(handle: Any) -> tuple:
+    """(n_params, n_tensors, signature) of the adapter the handle holds."""
+    from khaos_attribution import gradient as G  # noqa: PLC0415
+    params = G.adapter_parameters(handle)
+    return int(sum(int(p.numel()) for p in params)), len(params), G.parameter_signature(params)

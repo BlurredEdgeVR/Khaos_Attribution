@@ -119,7 +119,24 @@ def environment(root: Path, runtime: str, *, check_only: bool = False) -> tuple:
         done = _run(cmd, cwd=root)
         if done.returncode != 0:
             return False, f"environment step failed ({' '.join(str(c) for c in cmd[:4])}…): {done.stderr.strip()[-300:]}"
-    return True, "the engine's environment installed"
+    ok, note = contract_into(python)
+    return ok, "the engine's environment installed" + ("" if ok else f"; {note}")
+
+
+CONTRACT_SRC_ENV = "KHAOS_CONTRACT_SRC"
+CONTRACT_REPO = "https://github.com/BlurredEdgeVR/Khaos_Attribution.git"
+
+
+def contract_into(python: Path) -> tuple:
+    """The contract's gradient maths into the engine's environment, the version this room runs: the measure worker
+    projects its features with it. From KHAOS_CONTRACT_SRC (a checkout) when set, else the tagged release."""
+    from khaos_attribution import __version__  # noqa: PLC0415
+    src = os.environ.get(CONTRACT_SRC_ENV, "").strip()
+    spec = src if src else f"khaos-attribution @ git+{CONTRACT_REPO}@v{__version__}"
+    done = _run([uv_path(), "pip", "install", "-q", "--python", python, "--no-deps", spec])
+    if done.returncode != 0:
+        return False, f"the contract could not be installed into the engine's environment: {done.stderr.strip()[-200:]}"
+    return True, f"khaos-attribution {__version__} in the engine's environment"
 
 
 def weights(root: Path, runtime: str, weights_dir: Path, *, check_only: bool = False) -> list:

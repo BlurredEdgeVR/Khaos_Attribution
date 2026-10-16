@@ -313,9 +313,10 @@ def abstention_reading(thresholds: Mapping | None, losses: Mapping | None, *, de
 
 
 def read_abstention(thresholds: Mapping | None, module, index_meta: Mapping, files: Sequence, *,
-                    duration_sec: float | None = None, index_sha256: str | None = None) -> dict:
+                    duration_sec: float | None = None, index_sha256: str | None = None, paired_loss=None) -> dict:
     """The rule read for one output on a live module, the one call both rooms' scorers make. Its two
-    losses are measured only when the numbers can be used here; a refused output raises ``NotAttributable``."""
+    losses are measured only when the numbers can be used here; a refused output raises ``NotAttributable``.
+    ``paired_loss`` is the engine's measure of the output with and without the adapter; the default is ACE-Step's."""
     from khaos_attribution import gradient as G  # noqa: PLC0415
     here = {"device_type": str(module.device_type), "compute_dtype": G.dtype_tag(module.dtype),
             "duration_sec": duration_sec, "index_sha256": index_sha256}
@@ -323,7 +324,7 @@ def read_abstention(thresholds: Mapping | None, module, index_meta: Mapping, fil
         losses = None
     else:
         try:
-            losses = G.paired_loss(module, index_meta, list(files))
+            losses = (paired_loss or G.paired_loss)(module, index_meta, list(files))
         except G.GradientUnavailable as exc:
             # An adapter that cannot be switched off is not read; it is never refused for it.
             return {"checked": False, "accepted": None, "reason": str(exc)}

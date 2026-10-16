@@ -85,8 +85,17 @@ def pair_files(tensor_dir: Path | str) -> list:
     return sorted(Path(tensor_dir).glob(f"*{PAIR_SUFFIX}"))
 
 
-def open_module(*args, **kwargs):
-    raise TrainingUnavailable("Stable Audio 3 has no measure slot yet: its influence index is not built on this engine")
+def open_module(api: TrainingApi, cfg: dict, adapter_file, *, checkpoint_root=None, device: str = "cuda",
+                dataset_dir=None, output_dir=None, precision: str | None = None):
+    """What a feature is taken on: a handle naming the engine's environment and the adapter, which the measure
+    worker loads per call; the torch runtime only (the MLX port takes no gradient for Khaos yet)."""
+    from khaos_attribution.engines.sa3.measure import Handle  # noqa: PLC0415
+    if api.runtime != "torch":
+        raise TrainingUnavailable("Stable Audio 3's gradient features are taken on the torch runtime (CUDA) only")
+    adapter_file = Path(adapter_file)
+    if not adapter_file.is_file():
+        raise TrainingUnavailable(f"no adapter file at {adapter_file}")
+    return Handle(root=api.root, python=api.python, adapter=adapter_file.resolve(), device_type=str(device).split(":")[0])
 
 
 # ── preprocessing: Khaos's dataset into Stability's clips ─────────────────────
