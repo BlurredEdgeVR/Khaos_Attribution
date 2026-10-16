@@ -52,6 +52,11 @@ class Handle:
     dtype: str = "torch.float32"
     model: str = DESCRIPTOR.variant_config("base") or "medium-base"
 
+    @property
+    def device(self) -> str:
+        """What an index records as the device it was built on: the worker's device type."""
+        return self.device_type
+
 
 def _env(handle: Handle) -> dict:
     import os  # noqa: PLC0415
