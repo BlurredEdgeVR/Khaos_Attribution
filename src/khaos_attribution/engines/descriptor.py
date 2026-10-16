@@ -128,6 +128,11 @@ class Descriptor:
         return self.doc["measure"]["feature_version"]
 
     @property
+    def train(self) -> dict:
+        """The engine's own training defaults for a recipe; empty when the room's defaults apply."""
+        return dict(self.doc.get("train") or {})
+
+    @property
     def memory(self) -> dict:
         """The engine's footprint and its scorer's peak, in GB, as measured on it; empty when never measured."""
         return dict(self.doc.get("memory") or {})

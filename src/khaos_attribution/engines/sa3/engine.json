@@ -21,13 +21,19 @@
       "name": "stable-audio-3-medium-base",
       "repo": "stabilityai/stable-audio-3-medium-base",
       "required": true,
-      "components": ["model.safetensors", "model_config.json"]
+      "components": [
+        "model.safetensors",
+        "model_config.json"
+      ]
     },
     {
       "name": "stable-audio-3-medium",
       "repo": "stabilityai/stable-audio-3-medium",
       "required": false,
-      "components": ["model.safetensors", "model_config.json"]
+      "components": [
+        "model.safetensors",
+        "model_config.json"
+      ]
     },
     {
       "name": "t5gemma-b-b-ul2",
@@ -38,8 +44,14 @@
     }
   ],
   "platforms": {
-    "cuda": ["train", "render"],
-    "mps": ["train", "render"]
+    "cuda": [
+      "train",
+      "render"
+    ],
+    "mps": [
+      "train",
+      "render"
+    ]
   },
   "conditioning": {
     "tempo": false,
@@ -64,20 +76,47 @@
     }
   },
   "default_variant": "base",
-  "render_setting_keys": ["steps", "guidance_scale", "apg_scale"],
+  "render_setting_keys": [
+    "steps",
+    "guidance_scale",
+    "apg_scale"
+  ],
   "bounds": {
-    "duration_seconds": [5, 120],
-    "steps": [1, 200],
-    "bpm": [30, 300],
-    "takes": [1, 16]
+    "duration_seconds": [
+      5,
+      120
+    ],
+    "steps": [
+      1,
+      200
+    ],
+    "bpm": [
+      30,
+      300
+    ],
+    "takes": [
+      1,
+      16
+    ]
   },
-  "rework_modes": ["retake", "repaint", "audio2audio"],
+  "rework_modes": [
+    "retake",
+    "repaint",
+    "audio2audio"
+  ],
   "adapter": {
     "type": "dora-rows",
-    "filenames": ["adapter_model.safetensors"],
+    "filenames": [
+      "adapter_model.safetensors"
+    ],
     "resumable": true
   },
   "measure": {
     "feature_version": "unmeasured"
+  },
+  "train": {
+    "learning_rate": 0.0001,
+    "adapter_rank": 16,
+    "adapter_alpha": 16
   }
 }

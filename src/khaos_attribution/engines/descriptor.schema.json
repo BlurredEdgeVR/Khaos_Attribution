@@ -315,6 +315,13 @@
           }
         }
       }
+    },
+    "train": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "number"
+      },
+      "description": "The engine's own training defaults, applied over a Khaos recipe when a run names this engine: learning_rate, adapter_rank, adapter_alpha and any other number its trainer takes."
     }
   }
 }
