@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from khaos_attribution.engines.sa3 import DESCRIPTOR
-from khaos_attribution.engines.sa3.render import MLX_SUBDIR, find_root, runtime_for
+from khaos_attribution.engines.sa3.render import MLX_SUBDIR, WINDOWS, find_root, runtime_for, venv_python
 from khaos_attribution.engines.sa3.train import BASE_NPZ
 
 # Stability's CUDA 12.6 build of torch 2.7.1 cannot drive a Blackwell card; its CUDA 12.8 build can.
@@ -145,7 +145,7 @@ def environment(root: Path, runtime: str, *, check_only: bool = False) -> tuple:
     """The engine's own interpreter: (ok, note)."""
     if runtime == "mlx":
         mlx = root / MLX_SUBDIR
-        python = mlx / ".venv" / "bin" / "python"
+        python = venv_python(root, "mlx")
         if python.is_file():
             probe = _run([python, "-c", "import mlx.core, safetensors; print('ok')"], cwd=mlx)
             if probe.returncode == 0:
@@ -157,11 +157,15 @@ def environment(root: Path, runtime: str, *, check_only: bool = False) -> tuple:
             return False, f"the MLX installer failed: {done.stderr.strip()[-300:]}"
         _run([uv_path(), "pip", "install", "-q", "--python", python, "safetensors"])
         return python.is_file(), "the MLX runtime installed"
-    python = root / ".venv" / "bin" / "python"
+    python = venv_python(root, "torch")
+    # Flash Attention has no Windows build; Stability's model falls back to PyTorch's own attention without it.
+    probe_code = ("import torch, stable_audio_3" + ("" if WINDOWS else ", flash_attn")
+                  + "; assert torch.cuda.is_available(); print('ok')")
+    probe_note = "torch sees the GPU and stable_audio_3 imports" + ("" if WINDOWS else "; Flash Attention imports")
     if python.is_file():
-        probe = _run([python, "-c", "import torch, stable_audio_3, flash_attn; assert torch.cuda.is_available(); print('ok')"])
+        probe = _run([python, "-c", probe_code])
         if probe.returncode == 0:
-            return True, "torch sees the GPU, Flash Attention and stable_audio_3 import"
+            return True, probe_note
         if check_only:
             return False, f"the environment at {python} cannot run the engine: {probe.stderr.strip()[-200:]}"
     elif check_only:
@@ -182,7 +186,7 @@ def environment(root: Path, runtime: str, *, check_only: bool = False) -> tuple:
          f"{TORCHAUDIO}+cu128", "--extra-index-url", TORCH_INDEX, "--index-strategy", "unsafe-best-match"],
         [uv, "pip", "install", "-q", "--python", python, "--no-sources", "--no-deps", "-e", root],
         [uv, "pip", "install", "-q", "--python", python, "setuptools", "wheel", "ninja", "psutil", "matplotlib", "wandb"],
-        [uv, "pip", "install", "--python", python, "--no-build-isolation", FLASH_ATTN],
+        *([] if WINDOWS else [[uv, "pip", "install", "--python", python, "--no-build-isolation", FLASH_ATTN]]),
     ]
     for cmd in steps:
         done = _run(cmd, cwd=root)
@@ -191,10 +195,10 @@ def environment(root: Path, runtime: str, *, check_only: bool = False) -> tuple:
     ok, note = contract_into(python)
     if not ok:
         return False, f"the engine's environment installed; {note}"
-    probe = _run([python, "-c", "import torch, stable_audio_3, flash_attn; assert torch.cuda.is_available(); print('ok')"])
+    probe = _run([python, "-c", probe_code])
     if probe.returncode != 0:
         return False, f"the environment installed but cannot run the engine: {probe.stderr.strip()[-200:]}"
-    return True, "the engine's environment installed; torch sees the GPU, Flash Attention and stable_audio_3 import"
+    return True, f"the engine's environment installed; {probe_note}"
 
 
 CONTRACT_SRC_ENV = "KHAOS_CONTRACT_SRC"
@@ -237,7 +241,7 @@ def weights(root: Path, runtime: str, weights_dir: Path, *, check_only: bool = F
     """Every weight set the descriptor lists for this runtime: torch sets into the Hugging Face cache by the
     engine's own downloader (a gated set only once the user's own login has been approved); the MLX port's set
     through its own weights module, its ready-made base file linked where the trainer looks."""
-    python = (root / MLX_SUBDIR if runtime == "mlx" else root) / ".venv" / "bin" / "python"
+    python = venv_python(root, runtime)
     out = []
     for w in DESCRIPTOR.weights:
         if w.get("runtime") and w["runtime"] != runtime:
@@ -300,7 +304,7 @@ def weights(root: Path, runtime: str, weights_dir: Path, *, check_only: bool = F
 def installed(root: Path, runtime: str, weights_dir: Path) -> bool:
     """A cheap reading of whether the engine can run here: its own interpreter and, on MLX, its base weights.
     The full check is provision(check_only=True)."""
-    python = (root / MLX_SUBDIR if runtime == "mlx" else root) / ".venv" / "bin" / "python"
+    python = venv_python(root, runtime)
     if not python.is_file():
         return False
     return runtime != "mlx" or mlx_base_link(root, weights_dir).exists()
@@ -311,9 +315,6 @@ def provision(repo_dir=None, weights_dir=None, *, device: str = "auto", check_on
     runtime = runtime_for(device)
     weights_dir = Path(weights_dir) if weights_dir else root / "checkpoints"
     report = Report()
-    if os.name == "nt":
-        report.bad(f"{DESCRIPTOR.name} is not provisioned on Windows yet: its environment and workers are POSIX")
-        return report
     ok, note = checkout(root, check_only=check_only)
     (report.ok if ok else report.bad)(note)
     if ok:

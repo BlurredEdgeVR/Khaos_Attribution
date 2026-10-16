@@ -38,6 +38,13 @@ def runtime_for(device: str) -> str:
 
 
 PYTHON_ENV = {"torch": "SA3_PYTHON", "mlx": "SA3_MLX_PYTHON"}
+WINDOWS = os.name == "nt"
+
+
+def venv_python(root: Path, runtime: str) -> Path:
+    """The interpreter provisioning makes for a runtime, in the layout this platform's venvs have."""
+    home = root / MLX_SUBDIR if runtime == "mlx" else root
+    return home / ".venv" / ("Scripts/python.exe" if WINDOWS else "bin/python")
 
 
 def python_for(root: Path, runtime: str) -> Path:
@@ -48,7 +55,7 @@ def python_for(root: Path, runtime: str) -> Path:
         if not Path(env).is_file():
             raise RenderFailed(f"{PYTHON_ENV[runtime]} names no interpreter at {env}")
         return Path(env)
-    venv = (root / MLX_SUBDIR if runtime == "mlx" else root) / ".venv" / "bin" / "python"
+    venv = venv_python(root, runtime)
     if not venv.is_file():
         raise RenderFailed(f"Stable Audio 3 is not provisioned at {root} for {runtime}: no interpreter at {venv}")
     return venv
@@ -180,12 +187,12 @@ def stop_tree(proc) -> None:
     import time  # noqa: PLC0415
     if proc.poll() is not None:
         return
-    for sig in (signal.SIGTERM, signal.SIGKILL):
+    for ask in (proc.terminate, proc.kill):
         try:
-            if os.getpgid(proc.pid) == proc.pid:
-                os.killpg(proc.pid, sig)
+            if hasattr(os, "getpgid") and os.getpgid(proc.pid) == proc.pid:
+                os.killpg(proc.pid, signal.SIGTERM if ask is proc.terminate else signal.SIGKILL)
             else:
-                proc.send_signal(sig)
+                ask()   # on Windows a terminate is a kill; the room's own tree stop covers the children
         except (ProcessLookupError, PermissionError, OSError):
             pass
         deadline = time.monotonic() + 3.0

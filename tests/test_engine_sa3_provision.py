@@ -166,3 +166,37 @@ def test_an_unpacked_checkout_moves_to_a_new_pin_and_keeps_its_environments(tmp_
     ok, note = P.checkout(root)
     assert ok and "moved to the pin" in note and P.DESCRIPTOR.commit in unpacked["url"]
     assert (root / ".venv" / "bin" / "python").is_file() and (root / "optimized/mlx/models/mlx/t5gemma_f16.npz").is_file()
+
+
+def test_on_windows_the_environment_has_its_own_layout_and_no_flash_attention(tmp_path, monkeypatch):
+    from khaos_attribution.engines.sa3 import render as R
+    monkeypatch.setattr(R, "WINDOWS", True)
+    monkeypatch.setattr(P, "WINDOWS", True)
+    root = tmp_path / "sa3"
+    (root / ".git").mkdir(parents=True)
+    assert R.venv_python(root, "torch") == root / ".venv" / "Scripts" / "python.exe"
+    calls = []
+
+    def fake_run(cmd, cwd=None, env=None):
+        cmd = [str(c) for c in cmd]
+        calls.append(cmd)
+        if "rev-parse" in cmd:
+            return _done(out=P.DESCRIPTOR.commit + "\n")
+        if "export" in cmd:
+            return _done(out="einops==0.8.0\ntorch==2.7.1\n")
+        if "-c" in cmd and "import torch" in cmd[-1]:
+            (root / ".venv" / "Scripts").mkdir(parents=True, exist_ok=True)
+            (root / ".venv" / "Scripts" / "python.exe").write_text("")
+            return _done(0, "ok")
+        return _done()
+    monkeypatch.setattr(P, "_run", fake_run)
+    monkeypatch.setattr(P, "uv_path", lambda: "uv")
+    monkeypatch.setattr(P, "contract_into", lambda python: (True, "contract"))
+    monkeypatch.setattr(P, "cached", lambda repo, files: True)
+    report = P.provision(root, tmp_path / "w", device="cuda")
+    assert report.passed, report.text()
+    joined = [" ".join(c) for c in calls]
+    assert not any("flash-attn" in c for c in joined), "no Flash Attention build on Windows"
+    assert not any("flash_attn" in c for c in joined), "the probe does not ask for it either"
+    assert any("Scripts/python.exe" in c or "Scripts\\python.exe" in c for c in joined)
+    assert P.installed(root, "torch", tmp_path / "w")

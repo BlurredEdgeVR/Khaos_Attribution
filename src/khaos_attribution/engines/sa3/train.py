@@ -18,7 +18,7 @@ from pathlib import Path
 
 from khaos_attribution.engines.render import RenderFailed
 from khaos_attribution.engines.sa3 import DESCRIPTOR
-from khaos_attribution.engines.sa3.render import MLX_SUBDIR, find_root, python_for, runtime_for, stop_tree
+from khaos_attribution.engines.sa3.render import MLX_SUBDIR, WINDOWS, find_root, python_for, runtime_for, stop_tree
 from khaos_attribution.engines.train import TrainingUnavailable, TrainingUpdate
 from khaos_attribution.identifiers import track_of_segment
 
@@ -227,7 +227,7 @@ def trainer_command(api: TrainingApi, cfg: dict, *, tensor_dir: Path, save_dir: 
                 "--checkpoint_every", str(steps["checkpoint_every"]), "--duration", str(window_seconds),
                 "--seed", str(int(seed)), "--logger", "csv", "--name", "khaos", "--save_dir", str(save_dir),
                 "--batch_size", str(max(1, int(cfg.get("batch_size") or 1))),
-                "--demo_every", str(10 ** 9), "--num_workers", "4",
+                "--demo_every", str(10 ** 9), "--num_workers", "0" if WINDOWS else "4",
                 *(["--lora_checkpoint", str(resume_from)] if resume_from else [])]
     mlx = api.root / MLX_SUBDIR
     crop = max(2, int(round(window_seconds * DESCRIPTOR.sample_rate / 4096)))
