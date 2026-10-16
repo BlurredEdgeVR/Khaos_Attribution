@@ -420,7 +420,8 @@ class HeldoutEvaluator:
 
     def __init__(self, session: Session, tensor_val_dir: Path, *, n_buckets: int) -> None:
         self.session = session
-        self.tensor_val_dir = tensor_val_dir
+        # The worker runs in the engine's checkout, so every path it is handed is absolute.
+        self.tensor_val_dir = Path(tensor_val_dir).resolve()
         self.timesteps = bucket_timesteps(n_buckets)
         self.adapter: Path | None = None
         self.samples = pair_files(tensor_val_dir)
@@ -435,10 +436,12 @@ class HeldoutEvaluator:
     def evaluate(self) -> dict:
         api = self.session.api
         adapter = self.adapter or self.session.latest_adapter
+        adapter = Path(adapter).resolve() if adapter else None
         request = {"runtime": api.runtime, "model": DESCRIPTOR.variant_config("base"), "clips_dir": str(self.tensor_val_dir),
                    "latents_dir": str(self.tensor_val_dir / LATENTS_DIRNAME), "adapter": str(adapter) if adapter else None,
                    "timesteps": self.timesteps, "seed": self.session.seed, "high_noise_t": HIGH_NOISE_T,
-                   "checkpoint_root": str(self.session.checkpoint_root), "base_npz": str(self.session.checkpoint_root / BASE_NPZ)}
+                   "checkpoint_root": str(self.session.checkpoint_root.resolve()),
+                   "base_npz": str((self.session.checkpoint_root / BASE_NPZ).resolve())}
         done = subprocess.run([str(api.python), str(HELDOUT_WORKER)], input=json.dumps(request), cwd=str(api.root),
                               capture_output=True, text=True, env=_env(api))
         last = (done.stdout or "").strip().splitlines()[-1:] or [""]
