@@ -22,11 +22,11 @@ steps = int(arg("--steps") or arg("--max-steps"))
 every = int(arg("--checkpoint_every") or arg("--checkpoint-every"))
 runtime = "mlx" if "--max-steps" in args else "torch"
 if runtime == "torch":
-    logs = save_dir / "lightning_logs" / "version_0"; logs.mkdir(parents=True)
-    with (logs / "metrics.csv").open("w", newline="") as fh:
-        w = csv.DictWriter(fh, fieldnames=["step", "train/loss"]); w.writeheader()
+    save_dir.mkdir(parents=True, exist_ok=True)
+    with (save_dir / "khaos_losses.csv").open("w", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=["step", "loss"]); w.writeheader()
         for s in range(steps):
-            w.writerow({"step": s, "train/loss": f"{1.0 / (s + 1):.4f}"}); fh.flush()
+            w.writerow({"step": s + 1, "loss": f"{1.0 / (s + 1):.4f}"}); fh.flush()
             if (s + 1) % every == 0:
                 (save_dir / f"epoch=0-step={s + 1}.ckpt").write_bytes(b"ckpt")
 else:
@@ -61,7 +61,9 @@ def _clips(d, n):
 def api(tmp_path, monkeypatch):
     root = tmp_path / "stable-audio-3"
     (root / "scripts").mkdir(parents=True)
-    (root / "scripts" / "train_lora.py").write_text(FAKE_TRAINER)
+    driver = tmp_path / "driver.py"
+    driver.write_text(FAKE_TRAINER)
+    monkeypatch.setattr(T, "TRAIN_DRIVER", driver)
     (root / "optimized" / "mlx" / "scripts").mkdir(parents=True)
     (root / "optimized" / "mlx" / "scripts" / "lora_train_mlx.py").write_text(FAKE_TRAINER)
     convert = tmp_path / "convert.py"
@@ -86,6 +88,7 @@ def test_the_trainer_is_driven_as_a_process_and_its_run_becomes_khaos_updates(ap
     assert session.steps == {"per_epoch": 3, "total": 6, "checkpoint_every": 3, "epochs": 2}
     cmd = session.command()
     assert "--data_dir" in cmd and cmd[cmd.index("--adapter_type") + 1] == "dora-rows" and "--duration" in cmd
+    assert cmd[1].endswith("driver.py")
     updates = list(session.train())
     kinds = [u.kind for u in updates]
     assert kinds[0] == "info" and kinds[-1] == "complete"
@@ -99,7 +102,7 @@ def test_the_trainer_is_driven_as_a_process_and_its_run_becomes_khaos_updates(ap
     assert (tmp_path / "run" / "sa3" / "train_command.json").is_file()
     with session.install_hooks(record_into=(rec := {})):
         pass
-    assert rec["stem_loss_weight"] == 1.0 and session.module is None
+    assert rec == {} and session.module is None
 
 
 def test_the_mlx_runtime_reads_the_telemetry_and_needs_the_base_npz(api, tmp_path):
@@ -122,7 +125,7 @@ def test_the_mlx_runtime_reads_the_telemetry_and_needs_the_base_npz(api, tmp_pat
 
 
 def test_a_trainer_that_dies_is_a_fail_update_with_its_last_lines(api, tmp_path):
-    (api.root / "scripts" / "train_lora.py").write_text("import sys; print('boom'); sys.exit(3)")
+    T.TRAIN_DRIVER.write_text("import sys; print('boom'); sys.exit(3)")
     tensors = tmp_path / "run" / "tensors"
     _clips(tensors, 1)
     session = T.open_session(api, RECIPE, checkpoint_root=tmp_path, tensor_dir=tensors, output_dir=tmp_path / "run",
@@ -134,10 +137,9 @@ def test_a_trainer_that_dies_is_a_fail_update_with_its_last_lines(api, tmp_path)
 
 
 def test_losses_are_read_from_either_trainers_log(tmp_path):
-    logs = tmp_path / "lightning_logs" / "version_0"
-    logs.mkdir(parents=True)
-    (logs / "metrics.csv").write_text("step,train/loss,train/lr\n0,0.5,1e-4\n1,,1e-4\n2,0.25,1e-4\n")
+    (tmp_path / "khaos_losses.csv").write_text("step,loss\n1,0.5\n2,\n3,0.25\n")
     assert T.losses_from_metrics_csv(tmp_path) == [(1, 0.5), (3, 0.25)]
+    assert T.losses_from_metrics_csv(tmp_path / "absent") == []
     tele = tmp_path / "loss_by_timestep.bin"
     tele.write_bytes(struct.pack("Iff", 1, 0.5, 0.75) + struct.pack("Iff", 2, 0.4, 0.5) + b"\x00")
     assert T.losses_from_telemetry(tele) == [(1, 0.75), (2, 0.5)]

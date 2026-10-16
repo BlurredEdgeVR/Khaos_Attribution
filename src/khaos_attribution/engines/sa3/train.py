@@ -35,6 +35,8 @@ HIGH_NOISE_T = 0.8
 DEFAULT_BUCKETS = 10
 HELDOUT_WORKER = Path(__file__).with_name("heldout_worker.py")
 CONVERT_WORKER = Path(__file__).with_name("convert_worker.py")
+TRAIN_DRIVER = Path(__file__).with_name("train_driver.py")
+LOSSES_CSV = "khaos_losses.csv"
 
 __all__ = ["LossHooks", "Session", "TrainingApi", "TrainingUnavailable", "adapter_file_in", "adapter_kwargs",
            "open_module", "open_session", "pair_files", "preprocess_pairs", "training_api"]
@@ -153,7 +155,7 @@ def pre_encode(api: TrainingApi, clips_dir: Path, checkpoint_root: Path) -> dict
 
 
 def _env(api: TrainingApi) -> dict:
-    return {**os.environ, "PYTHONPATH": str(api.root), "WANDB_MODE": "disabled",
+    return {**os.environ, "PYTHONPATH": str(api.root), "SA3_ROOT": str(api.root), "WANDB_MODE": "disabled",
             "HF_HUB_OFFLINE": os.environ.get("HF_HUB_OFFLINE", "1")}
 
 
@@ -167,7 +169,7 @@ class LossHooks:
         self._record_into = record_into
 
     def manifest_fields(self) -> dict:
-        return {"latent_crop_sec": None, "stem_loss_weight": 1.0, "timestep_high_noise_bias": 0.0}
+        return {}
 
     def __enter__(self) -> "LossHooks":
         return self
@@ -208,7 +210,8 @@ def trainer_command(api: TrainingApi, cfg: dict, *, tensor_dir: Path, save_dir: 
     adapter_type, a = adapter_kwargs(cfg)
     lr = float(cfg.get("learning_rate") or 1e-4)
     if api.runtime == "torch":
-        return [str(api.python), str(api.root / "scripts" / "train_lora.py"),
+        # Through the driver: Stability's script logs no loss and its demo callback renders at step 1 regardless.
+        return [str(api.python), str(TRAIN_DRIVER),
                 "--model", DESCRIPTOR.variant_config("base"), "--data_dir", str(tensor_dir),
                 "--rank", str(a["rank"]), "--lora_alpha", str(a["alpha"]), "--adapter_type", adapter_type,
                 "--dropout", str(a["dropout"]), "--lr", str(lr), "--steps", str(steps["total"]),
@@ -229,17 +232,16 @@ def trainer_command(api: TrainingApi, cfg: dict, *, tensor_dir: Path, save_dir: 
 
 
 def losses_from_metrics_csv(save_dir: Path) -> list:
-    """(step, loss) rows Lightning's CSV logger wrote so far, every version in order."""
+    """(step, loss) rows the driver's callback wrote so far (khaos_losses.csv: step 1-based, loss)."""
     rows = []
-    for metrics in sorted(save_dir.glob("lightning_logs/version_*/metrics.csv")):
-        try:
-            with metrics.open(newline="", encoding="utf-8") as fh:
-                for row in csv.DictReader(fh):
-                    loss = row.get("train/loss") or row.get("train/mse_loss")
-                    if loss not in (None, ""):
-                        rows.append((int(float(row.get("step") or 0)) + 1, float(loss)))
-        except (OSError, ValueError):
-            continue
+    path = save_dir / LOSSES_CSV
+    try:
+        with path.open(newline="", encoding="utf-8") as fh:
+            for row in csv.DictReader(fh):
+                if row.get("loss") not in (None, ""):
+                    rows.append((int(float(row.get("step") or 0)), float(row["loss"])))
+    except (OSError, ValueError):
+        return rows
     return rows
 
 
