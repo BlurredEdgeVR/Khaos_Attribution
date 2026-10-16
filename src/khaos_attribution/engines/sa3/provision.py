@@ -165,7 +165,12 @@ def environment(root: Path, runtime: str, *, check_only: bool = False) -> tuple:
     if python.is_file():
         probe = _run([python, "-c", probe_code])
         if probe.returncode == 0:
-            return True, probe_note
+            if contract_present(python):
+                return True, probe_note
+            if check_only:
+                return False, f"the environment at {python} runs the engine but lacks this contract's version"
+            ok, note = contract_into(python, root)
+            return ok, (probe_note + "; " + note) if ok else note
         if check_only:
             return False, f"the environment at {python} cannot run the engine: {probe.stderr.strip()[-200:]}"
     elif check_only:
@@ -192,7 +197,7 @@ def environment(root: Path, runtime: str, *, check_only: bool = False) -> tuple:
         done = _run(cmd, cwd=root)
         if done.returncode != 0:
             return False, f"environment step failed ({' '.join(str(c) for c in cmd[:4])}…): {done.stderr.strip()[-300:]}"
-    ok, note = contract_into(python)
+    ok, note = contract_into(python, root)
     if not ok:
         return False, f"the engine's environment installed; {note}"
     probe = _run([python, "-c", probe_code])
@@ -202,17 +207,38 @@ def environment(root: Path, runtime: str, *, check_only: bool = False) -> tuple:
 
 
 CONTRACT_SRC_ENV = "KHAOS_CONTRACT_SRC"
+CONTRACT_WHEEL_ENV = "KHAOS_CONTRACT_WHEEL"
 CONTRACT_REPO = "https://github.com/BlurredEdgeVR/Khaos_Attribution.git"
 
 
-def contract_into(python: Path) -> tuple:
-    """The contract's gradient maths into the engine's environment, the version this room runs: the measure worker
-    projects its features with it. From KHAOS_CONTRACT_SRC (a checkout) when set, else the tagged release."""
+def contract_spec(root: Path) -> str:
+    """Where the contract comes from for the engine's environment: a checkout named in KHAOS_CONTRACT_SRC, a wheel
+    named in KHAOS_CONTRACT_WHEEL (the app ships one), the room's sibling checkout, else the tagged release."""
     from khaos_attribution import __version__  # noqa: PLC0415
     src = os.environ.get(CONTRACT_SRC_ENV, "").strip()
-    spec = src if src else f"khaos-attribution @ git+{CONTRACT_REPO}@v{__version__}"
+    if src:
+        return src
+    wheel = os.environ.get(CONTRACT_WHEEL_ENV, "").strip()
+    if wheel:
+        return wheel
+    sibling = root.parent / "Khaos_Attribution"
+    if (sibling / "pyproject.toml").is_file():
+        return str(sibling)
+    return f"khaos-attribution @ git+{CONTRACT_REPO}@v{__version__}"
+
+
+def contract_present(python: Path) -> bool:
+    from khaos_attribution import __version__  # noqa: PLC0415
+    probe = _run([python, "-c", "import khaos_attribution as k; print(k.__version__)"])
+    return probe.returncode == 0 and probe.stdout.strip() == __version__
+
+
+def contract_into(python: Path, root: Path) -> tuple:
+    """The contract's gradient maths into the engine's environment, the version this room runs: the measure worker
+    projects its features with it."""
+    from khaos_attribution import __version__  # noqa: PLC0415
     # With its base dependencies (jsonschema, numpy): the engine's own pins are Stability's, the contract's are light.
-    done = _run([uv_path(), "pip", "install", "-q", "--python", python, spec])
+    done = _run([uv_path(), "pip", "install", "-q", "--python", python, "--reinstall-package", "khaos-attribution", contract_spec(root)])
     if done.returncode != 0:
         return False, f"the contract could not be installed into the engine's environment: {done.stderr.strip()[-200:]}"
     return True, f"khaos-attribution {__version__} in the engine's environment"

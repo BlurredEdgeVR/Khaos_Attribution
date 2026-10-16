@@ -34,6 +34,7 @@ def test_check_compares_the_pin_and_the_environment_and_each_weight(tmp_path, mo
             return _done(0, "ok")
         return _done()
     monkeypatch.setattr(P, "_run", fake_run)
+    monkeypatch.setattr(P, "contract_present", lambda python: True)
     (root / ".venv" / "bin").mkdir(parents=True)
     (root / ".venv" / "bin" / "python").write_text("")
     have = set()
@@ -66,6 +67,7 @@ def test_an_install_fills_the_cache_through_the_engines_own_downloader(tmp_path,
             return _done(1, err="Connection timed out") if calls and sum("snapshot_download" in " ".join(c) for c, _ in calls) > 1 else _done()
         return _done()
     monkeypatch.setattr(P, "_run", fake_run)
+    monkeypatch.setattr(P, "contract_present", lambda python: True)
     monkeypatch.setattr(P, "cached", lambda repo, files: any("snapshot_download" in " ".join(c) and c[-2] == repo for c, _ in calls))
     report = P.provision(root, tmp_path / "w", device="cuda")
     text = report.text()
@@ -191,7 +193,8 @@ def test_on_windows_the_environment_has_its_own_layout_and_no_flash_attention(tm
         return _done()
     monkeypatch.setattr(P, "_run", fake_run)
     monkeypatch.setattr(P, "uv_path", lambda: "uv")
-    monkeypatch.setattr(P, "contract_into", lambda python: (True, "contract"))
+    monkeypatch.setattr(P, "contract_present", lambda python: True)
+    monkeypatch.setattr(P, "contract_into", lambda python, root: (True, "contract"))
     monkeypatch.setattr(P, "cached", lambda repo, files: True)
     report = P.provision(root, tmp_path / "w", device="cuda")
     assert report.passed, report.text()
@@ -200,3 +203,20 @@ def test_on_windows_the_environment_has_its_own_layout_and_no_flash_attention(tm
     assert not any("flash_attn" in c for c in joined), "the probe does not ask for it either"
     assert any("Scripts/python.exe" in c or "Scripts\\python.exe" in c for c in joined)
     assert P.installed(root, "torch", tmp_path / "w")
+
+
+def test_the_contract_comes_from_the_nearest_source(tmp_path, monkeypatch):
+    """A checkout named in the environment, then a shipped wheel, then the room's sibling checkout, then the tag."""
+    from khaos_attribution import __version__
+    root = tmp_path / "engines" / "stable-audio-3"
+    root.mkdir(parents=True)
+    monkeypatch.delenv(P.CONTRACT_SRC_ENV, raising=False)
+    monkeypatch.delenv(P.CONTRACT_WHEEL_ENV, raising=False)
+    assert P.contract_spec(root) == f"khaos-attribution @ git+{P.CONTRACT_REPO}@v{__version__}"
+    (tmp_path / "engines" / "Khaos_Attribution").mkdir()
+    (tmp_path / "engines" / "Khaos_Attribution" / "pyproject.toml").write_text("")
+    assert P.contract_spec(root) == str(tmp_path / "engines" / "Khaos_Attribution")
+    monkeypatch.setenv(P.CONTRACT_WHEEL_ENV, str(tmp_path / "k.whl"))
+    assert P.contract_spec(root) == str(tmp_path / "k.whl")
+    monkeypatch.setenv(P.CONTRACT_SRC_ENV, str(tmp_path / "src"))
+    assert P.contract_spec(root) == str(tmp_path / "src")
