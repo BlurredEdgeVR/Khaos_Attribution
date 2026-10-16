@@ -53,7 +53,7 @@ class Checklist:
 
 
 def check(engine_id: str, workdir: Path | str | None = None, *, live: bool = False, repo_dir=None,
-          checkpoint_dir=None) -> Checklist:
+          checkpoint_dir=None, device: str = "auto") -> Checklist:
     """Every check the socket asks of an engine; ``live`` also renders, which needs the engine's weights."""
     out = Checklist(engine_id)
     if engine_id not in KNOWN_ENGINES:
@@ -109,7 +109,7 @@ def check(engine_id: str, workdir: Path | str | None = None, *, live: bool = Fal
     except Exception as exc:  # noqa: BLE001
         out.add("measure.memory_plan", False, f"{type(exc).__name__}: {exc}")
     if live and renderer_cls is not None:
-        _live(out, d, renderer_cls, Path(workdir or Path.cwd()) / "checklist", repo_dir, checkpoint_dir)
+        _live(out, d, renderer_cls, Path(workdir or Path.cwd()) / "checklist", repo_dir, checkpoint_dir, device)
     return out
 
 
@@ -122,10 +122,10 @@ def _sha(path: Path) -> str:
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def _live(out: Checklist, d, renderer_cls, workdir: Path, repo_dir, checkpoint_dir) -> None:
+def _live(out: Checklist, d, renderer_cls, workdir: Path, repo_dir, checkpoint_dir, device: str = "auto") -> None:
     workdir.mkdir(parents=True, exist_ok=True)
     try:
-        r = renderer_cls(repo_dir=repo_dir, checkpoint_dir=checkpoint_dir)
+        r = renderer_cls(repo_dir=repo_dir, checkpoint_dir=checkpoint_dir, device=device)
         r.load(d.default_variant)
         out.add("live.load", True, d.default_variant)
     except Exception as exc:  # noqa: BLE001
@@ -165,8 +165,9 @@ def main(argv=None) -> int:
     ap.add_argument("--workdir", type=Path, default=None)
     ap.add_argument("--repo-dir", type=Path, default=None)
     ap.add_argument("--checkpoint-dir", type=Path, default=None)
+    ap.add_argument("--device", default="auto", help="the renderer's device (auto picks this machine's)")
     a = ap.parse_args(argv)
-    result = check(a.engine, a.workdir, live=a.live, repo_dir=a.repo_dir, checkpoint_dir=a.checkpoint_dir)
+    result = check(a.engine, a.workdir, live=a.live, repo_dir=a.repo_dir, checkpoint_dir=a.checkpoint_dir, device=a.device)
     print(result.report())
     return 0 if result.passed else 1
 
