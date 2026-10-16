@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import base64
 import secrets
 import time
 from dataclasses import dataclass
@@ -401,10 +402,16 @@ class RegisterClient:
         """An outbox entry carries its nonce from the day it was written, so a retry is the same body, not a replay."""
         return self._post("/api/withdraw", {"serial": serial, "reason": reason, "nonce": nonce or secrets.token_hex(8)})
 
-    def release(self, generation_id: str, serial: int, fingerprint: list, nonce: str | None = None) -> dict:
-        """A released output's fingerprint into the index under its model's bucket."""
-        return self._post("/api/outputs", {"generation_id": generation_id, "serial": serial, "fingerprint": fingerprint,
-                                           "nonce": nonce or secrets.token_hex(8)})
+    def release(self, generation_id: str, serial: int, fingerprint: list, nonce: str | None = None,
+                manifest: bytes | str | None = None) -> dict:
+        """A released output's fingerprint into the index under its model's bucket, with its Content Credentials
+        manifest store when the file carries one, so a stripped copy can be led back to it."""
+        body = {"generation_id": generation_id, "serial": serial, "fingerprint": fingerprint,
+                "nonce": nonce or secrets.token_hex(8)}
+        if manifest:
+            # An outbox entry already holds it as base64 text.
+            body["manifest"] = manifest if isinstance(manifest, str) else base64.b64encode(manifest).decode()
+        return self._post("/api/outputs", body)
 
     def claim(self, record_sha256: str, track_id: str, fingerprint: list | None = None, declaration: str = "",
               nonce: str | None = None, phases: list | None = None) -> dict:

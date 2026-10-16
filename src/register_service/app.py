@@ -19,10 +19,12 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 
 from khaos_attribution import registry as R
 from khaos_attribution.watermark import decode_codeword
+from register_service import softbinding
 from register_service.index import Index
 from register_service.store import Store, now_utc
 
 MAX_BODY = 8_000_000   # a long output's four-phase fingerprint runs to a few megabytes
+MANIFEST_MAX_BYTES = 1_000_000   # a piece's own manifest store is kilobytes
 CLAIM_MAX_BODY = 24_000_000   # a twelve-minute track's four phases, with room
 DEFAULT_PORT = 8912   # 8900 is the Engine Room's
 log = logging.getLogger("register_service")
@@ -169,6 +171,7 @@ def create_app(cfg: dict | None = None) -> FastAPI:
             log.error("mirror not written for %s: %s", serial, exc)
 
     limits = {path: RateLimit(n) for path, n in {**PUBLIC_LIMITS, **CLAIM_LIMITS}.items()}
+    lookup_limits = {path: RateLimit(n) for path, n in softbinding.LIMITS.items()}
     signed_limit = RateLimit(SIGNED_LIMIT)
     from register_service.verify_keys import Allowed  # noqa: PLC0415
     verify_key_allowed = Allowed(cfg)
@@ -179,7 +182,15 @@ def create_app(cfg: dict | None = None) -> FastAPI:
         # Caddy appends the real address to whatever the client sent, so the LAST entry is the one to trust.
         client = (request.headers.get("x-forwarded-for", "").split(",")[-1].strip() or (request.client.host if request.client else "?"))
         path = request.url.path
-        if request.method == "POST":
+        lookup = softbinding.limit_key(path)
+        if lookup is not None:
+            bucket = lookup_limits[lookup]
+            if path.endswith("/byContent") and verify_key_allowed(request.headers.get("x-khaos-verify-key")):
+                client, bucket = "key:" + request.headers["x-khaos-verify-key"].strip(), keyed_verify_limit
+            if not bucket.allow(client):
+                return JSONResponse({"detail": "too many requests from this address; try again in a minute"}, status_code=429,
+                                    headers={"Retry-After": "60"})
+        elif request.method == "POST":
             bucket = limits.get(path) or (signed_limit if path.startswith("/api/") else None)
             if path == "/api/verify" and verify_key_allowed(request.headers.get("x-khaos-verify-key")):
                 client, bucket = "key:" + request.headers["x-khaos-verify-key"].strip(), keyed_verify_limit
@@ -287,13 +298,29 @@ def create_app(cfg: dict | None = None) -> FastAPI:
             gid = str(body.get("generation_id") or "").strip()
             if not gid or len(gid) > 120:
                 raise HTTPException(422, "generation_id is a short string")
+            manifest = manifest_bytes(body.get("manifest"))    # a bad one is not kept; the release still stands
             try:
                 out = index.release(gid, rec["serial"], int(rec["signed"]["record"]["model"]["watermark_payload"]),
                                     rec["signed"]["record"]["artist_id"], body.get("fingerprint"), key_id, machine["role"])
             except ValueError as e:
                 raise HTTPException(422, str(e)) from None
-            return {k: out[k] for k in ("generation_id", "serial", "payload", "released_at", "landmarks", "already")}
+            kept = manifest is not None and index.keep_manifest(gid, manifest, key_id)
+            return {**{k: out[k] for k in ("generation_id", "serial", "payload", "released_at", "landmarks", "already")},
+                    "manifest_kept": kept}
         return once(body, key_id, work)
+
+    def manifest_bytes(value) -> bytes | None:
+        """A released output's Content Credentials manifest store (base64 of its JUMBF); None when none was sent or it
+        is not one."""
+        if value is None:
+            return None
+        import base64  # noqa: PLC0415
+        import binascii  # noqa: PLC0415
+        try:
+            data = base64.b64decode(str(value), validate=True)
+        except (binascii.Error, ValueError):
+            return None
+        return data if len(data) <= MANIFEST_MAX_BYTES and data[4:8] == b"jumb" else None
 
     def workshop_only(machine: dict) -> None:
         if machine["role"] != "workshop":
@@ -504,4 +531,5 @@ def create_app(cfg: dict | None = None) -> FastAPI:
         return JSONResponse({"ok": True, "ledger_ok": store.ledger_ok(), "models": len(store.serials()), "outputs": index.count(),
                              "development": bool(cfg["dev_key"])})
 
+    softbinding.add_routes(app, index, store, cfg["public_url"])
     return app

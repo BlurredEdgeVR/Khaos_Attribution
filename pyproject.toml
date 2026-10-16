@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "khaos_attribution"
-version = "0.31.0"
+version = "0.32.0"
 description = "JSON schemas and validators for artist attribution: provenance records and model cards."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -32,7 +32,8 @@ credentials = ["c2pa-python>=0.38; python_version >= '3.10'", "cryptography>=42"
 verify = ["soundfile>=0.12", "c2pa-python>=0.38; python_version >= '3.10'", "cryptography>=42"]
 detector = ["audioseal>=0.2", "torch>=2.2", "torchaudio>=2.2"]
 # register_service: the register itself, on its own machine.
-service = ["cryptography>=42", "fastapi>=0.110", "uvicorn>=0.27"]
+# The soft-binding lookup decodes uploaded audio to fingerprint it.
+service = ["cryptography>=42", "fastapi>=0.110", "uvicorn>=0.27", "soundfile>=0.12", "numpy>=1.24"]
 
 [project.scripts]
 khaos-verify = "khaos_attribution.verify:main"

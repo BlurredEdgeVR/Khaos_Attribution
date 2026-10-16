@@ -294,6 +294,33 @@ def sign_file(path: Path | str, record: dict, identity: Identity, *, product: st
     raise RuntimeError(f"the Content Credentials could not be signed: {last}")
 
 
+MANIFEST_STORE_MAX_BYTES = 1_000_000
+
+
+def manifest_store(path: Path | str) -> bytes | None:
+    """The C2PA manifest store a signed WAV carries in its own RIFF chunk, as the bytes a soft-binding lookup serves;
+    None for another format, an unsigned file, or one larger than the register keeps."""
+    import struct  # noqa: PLC0415
+    try:
+        with open(path, "rb") as fh:
+            head = fh.read(12)
+            if head[:4] != b"RIFF" or head[8:12] != b"WAVE":
+                return None
+            while True:
+                chunk = fh.read(8)
+                if len(chunk) < 8:
+                    return None
+                cid, size = chunk[:4], struct.unpack("<I", chunk[4:])[0]
+                if cid == b"C2PA":
+                    if size > MANIFEST_STORE_MAX_BYTES:
+                        return None
+                    data = fh.read(size)
+                    return data if len(data) == size and data[4:8] == b"jumb" else None
+                fh.seek(size + (size % 2), 1)
+    except OSError:
+        return None
+
+
 def is_signed(path: Path | str) -> bool:
     """True when the file carries Content Credentials whose signature still holds."""
     return read_file(path).get("state") in SIGNED_STATES

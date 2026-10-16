@@ -5,6 +5,7 @@ landmark hashes, never audio.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 import threading
@@ -20,6 +21,8 @@ CREATE TABLE IF NOT EXISTS fingerprints (hash INTEGER NOT NULL, generation_id TE
 CREATE INDEX IF NOT EXISTS fingerprints_hash ON fingerprints (hash);
 CREATE INDEX IF NOT EXISTS fingerprints_gen ON fingerprints (generation_id);
 CREATE INDEX IF NOT EXISTS outputs_payload ON outputs (payload);
+CREATE TABLE IF NOT EXISTS manifests (generation_id TEXT PRIMARY KEY, store BLOB NOT NULL, sha256 TEXT NOT NULL,
+    kept_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS claims (claim_id INTEGER PRIMARY KEY, account_id INTEGER NOT NULL, serial INTEGER NOT NULL,
   track_id TEXT NOT NULL, declaration TEXT NOT NULL, claimed_at TEXT NOT NULL, claimed_by TEXT NOT NULL,
   landmarks INTEGER NOT NULL, UNIQUE (serial, track_id));
@@ -73,6 +76,24 @@ class Index:
                 raise
         return {"generation_id": generation_id, "serial": serial, "payload": payload, "artist_id": artist_id,
                 "released_at": at, "released_by": released_by, "kind": kind, "landmarks": len(rows), "already": False}
+
+    def keep_manifest(self, generation_id: str, store: bytes, released_by: str) -> bool:
+        """A released output's Content Credentials manifest store, for the soft-binding lookup; only the machine that
+        released the output may set or replace it (a re-signed file carries a new one)."""
+        with self._lock:
+            out = self.db.execute("SELECT released_by FROM outputs WHERE generation_id = ?", (generation_id,)).fetchone()
+            if not out or out["released_by"] != released_by:
+                return False
+            self.db.execute("INSERT OR REPLACE INTO manifests (generation_id, store, sha256, kept_at) VALUES (?, ?, ?, ?)",
+                            (generation_id, store, hashlib.sha256(store).hexdigest(), now_utc()))
+        return True
+
+    def manifest(self, generation_id: str) -> bytes | None:
+        row = self.db.execute("SELECT store FROM manifests WHERE generation_id = ?", (generation_id,)).fetchone()
+        return bytes(row["store"]) if row else None
+
+    def has_manifest(self, generation_id: str) -> bool:
+        return self.db.execute("SELECT 1 FROM manifests WHERE generation_id = ?", (generation_id,)).fetchone() is not None
 
     def output(self, generation_id: str) -> dict | None:
         row = self.db.execute("SELECT * FROM outputs WHERE generation_id = ?", (generation_id,)).fetchone()
