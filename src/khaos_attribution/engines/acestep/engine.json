@@ -149,5 +149,16 @@
   "measure": {
     "feature_version": "vnorm/1",
     "timestep_convention": "t->1 is noise; flow-matching velocity x1-x0"
+  },
+  "memory": {
+    "resident_gb": 21.0,
+    "yielded_gb": 3.0,
+    "scorer": {
+      "base_gb": 9.4,
+      "gb_per_sec": 0.122,
+      "checkpointed_gb": 7.0,
+      "checkpointed_gb_per_sec": 0.005,
+      "process_gb": 1.6
+    }
   }
 }

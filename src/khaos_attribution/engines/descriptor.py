@@ -127,6 +127,11 @@ class Descriptor:
     def feature_version(self) -> str:
         return self.doc["measure"]["feature_version"]
 
+    @property
+    def memory(self) -> dict:
+        """The engine's footprint and its scorer's peak, in GB, as measured on it; empty when never measured."""
+        return dict(self.doc.get("memory") or {})
+
 
 def _schema() -> dict:
     return json.loads(resources.files("khaos_attribution.engines").joinpath(SCHEMA_NAME).read_text(encoding="utf-8"))

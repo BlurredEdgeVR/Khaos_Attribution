@@ -46,7 +46,18 @@ def engine(engine_id: str):
 
 @runtime_checkable
 class Engine(Protocol):
+    """What every engine object carries: its descriptor, and the three slots as modules (render: a renderer class
+    and request; train: the training door, configs and open_module; measure: memory plan and checkpointing)."""
     descriptor: Descriptor
+
+    @property
+    def render(self): ...
+
+    @property
+    def train(self): ...
+
+    @property
+    def measure(self): ...
 
 
 __all__ = ["Descriptor", "DescriptorError", "Engine", "EngineUnavailable", "KNOWN_ENGINES", "descriptor",
