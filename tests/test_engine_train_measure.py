@@ -2,6 +2,7 @@
 built from only the fields a revision takes, the module is opened with the adapter's weights loaded, and the memory
 plan and checkpointing are the rooms' rules, now in one place."""
 import logging
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -187,3 +188,90 @@ def test_checkpointing_gives_the_same_gradient_with_the_layers_contents_in_eval(
         assert torch.allclose(a, b)
     assert all(not layer.drop.training for layer in decoder.layers), "dropout stays in eval under the checkpoint"
     assert M.enable_checkpointing(module) == 3, "enabling twice is harmless"
+
+
+def _session_api(tmp_path, seen: dict):
+    class Trainer:
+        def __init__(self, model, adapter_config, training_config):
+            seen["trainer"] = dict(model=model, adapter_config=adapter_config, training_config=training_config)
+            self.module = SimpleNamespace(lycoris_net=None)
+            self.training_config = training_config
+
+        def train(self):
+            yield SimpleNamespace(step=0, loss=0.5, msg="[OK] Loaded", kind="info", epoch=0)
+            yield SimpleNamespace(step=3, loss=0.25, msg="[OK] Epoch 1", kind="epoch", epoch=1, lr=1e-3, epoch_time=2.0)
+            yield SimpleNamespace(step=3, loss=0.25, msg="[OK] Checkpoint", kind="checkpoint", epoch=1,
+                                  checkpoint_path=str(tmp_path / "checkpoints" / "epoch_1_loss_0.2500"))
+
+    def cfg_cls(adapter_type=None, model_variant=None, checkpoint_dir=None, dataset_dir=None, output_dir=None,
+                learning_rate=None, batch_size=None, max_epochs=None, seed=None, precision=None, device=None,
+                save_every_n_epochs=None, resume_from=None, linear_dim=None, linear_alpha=None, factor=None,
+                weight_decompose=None, attention_type=None, target_modules=None):
+        return dict(locals())
+
+    def save_final(trainer, out_dir):
+        Path(out_dir).mkdir(parents=True, exist_ok=True)
+        (Path(out_dir) / "lokr_weights.safetensors").write_bytes(b"w")
+
+    seven = (lambda **k: {}, Trainer, cfg_cls, cfg_cls, cfg_cls,
+             lambda root, variant, device, precision: ("model", variant, device, precision), save_final)
+    return T.TrainingApi.from_tuple(seven)
+
+
+RECIPE = {**CFG, "learning_rate": 1e-4, "batch_size": 1, "max_epochs": 2, "gradient_checkpointing": False,
+          "num_workers": 0, "pin_memory": False, "persistent_workers": False, "prefetch_factor": 2,
+          "checkpoint_every_n_epochs": 1, "lr_schedule": "cosine", "gradient_accumulation_steps": 1}
+
+
+def test_a_session_opens_the_trainer_from_the_recipe_and_streams_its_updates(tmp_path):
+    seen: dict = {}
+    loaded = []
+    s = T.open_session(_session_api(tmp_path, seen), RECIPE, checkpoint_root=tmp_path / "ck", tensor_dir=tmp_path / "t",
+                       output_dir=tmp_path, device="cpu", precision="bf16", seed=5, on_model_loaded=loaded.append)
+    assert loaded == [("model", "turbo", "cpu", "bf16")]
+    tc = seen["trainer"]["training_config"]
+    assert tc["max_epochs"] == 2 and tc["save_every_n_epochs"] == 1 and tc["seed"] == 5 and tc["resume_from"] is None
+    assert seen["trainer"]["adapter_config"]["linear_dim"] == 16 and "target_modules" not in seen["trainer"]["adapter_config"] or \
+        seen["trainer"]["adapter_config"].get("target_modules") is None
+    updates = list(s.train())
+    assert [u.kind for u in updates] == ["info", "epoch", "checkpoint"]
+    assert updates[1].lr == 1e-3 and updates[1].epoch_time == 2.0 and updates[2].checkpoint_path.endswith("epoch_1_loss_0.2500")
+    assert updates[0].checkpoint_path is None
+    assert s.save_final(tmp_path / "final").name == "lokr_weights.safetensors"
+    assert T.pair_files(tmp_path) == []
+    (tmp_path / "b.pt").write_bytes(b"1"); (tmp_path / "a.pt").write_bytes(b"1")
+    assert [p.name for p in T.pair_files(tmp_path)] == ["a.pt", "b.pt"]
+
+
+def test_a_resume_on_a_revision_without_resume_from_is_refused(tmp_path):
+    seen: dict = {}
+    api = _session_api(tmp_path, seen)
+
+    def old_cfg(adapter_type=None, model_variant=None, checkpoint_dir=None, dataset_dir=None, output_dir=None,
+                max_epochs=None, seed=None, precision=None, device=None, batch_size=None, learning_rate=None):
+        return dict(locals())
+    api = T.TrainingApi(**{**api.__dict__, "TrainingConfig": old_cfg})
+    with pytest.raises(RuntimeError, match="no resume_from support"):
+        T.open_session(api, RECIPE, checkpoint_root=tmp_path, tensor_dir=tmp_path, output_dir=tmp_path, device="cpu",
+                       precision="bf16", seed=1, resume_from=tmp_path / "ckpt")
+
+
+def test_a_seam_that_cannot_install_is_recorded_off_never_claimed():
+    """Fakes with no module-level F or collate cannot take the seams: every flag says off, nothing is left to undo,
+    and the variety record is still written at exit."""
+    record: dict = {}
+
+    class Module:
+        def training_step(self, batch):
+            return 0.0
+
+    class DM:
+        def train_dataloader(self):
+            return []
+    hooks = T.install_loss_hooks({"masked_loss": True, "length_buckets": True, "latent_crop_sec": 0,
+                                  "stem_loss_weight": 1.0}, seed=1, module_cls=Module, data_module_cls=DM,
+                                 record_into=record)
+    assert hooks.flags == {"masked_loss": False, "length_buckets": False} and hooks._undo == []
+    with hooks:
+        pass
+    assert isinstance(record, dict) and record == hooks.manifest_fields()

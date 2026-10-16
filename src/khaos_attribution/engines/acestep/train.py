@@ -32,8 +32,15 @@ class TrainingApi:
     LoKRConfig: Any
     load_decoder: Any
     save_final: Any
-    Module: Any
-    select_dtype: Any
+    Module: Any = None
+    select_dtype: Any = None
+
+    @classmethod
+    def from_tuple(cls, seven: tuple) -> "TrainingApi":
+        """The seven the Workshop's door hands out, back into an api (the module and dtype selector unset)."""
+        preprocess, trainer, training_config, lora, lokr, load_decoder, save_final = seven
+        return cls(preprocess=preprocess, Trainer=trainer, TrainingConfig=training_config, LoRAConfig=lora,
+                   LoKRConfig=lokr, load_decoder=load_decoder, save_final=save_final)
 
     def as_tuple(self) -> tuple:
         """The seven the Workshop's door hands out, in its order."""
@@ -238,3 +245,209 @@ def open_module(api: TrainingApi, cfg: dict, adapter_file: Path | str, *, checkp
     net.load_weights(str(adapter_file))
     log.info("Opened %s with %s in %s", variant, Path(adapter_file).name, dtype_tag(module.dtype))
     return module
+
+
+# ── the training session ─────────────────────────────────────────────────────
+
+from khaos_attribution.engines.train import TrainingUpdate  # noqa: E402,F401
+
+PAIR_SUFFIX = ".pt"
+
+
+def pair_files(tensor_dir: Path | str) -> list:
+    """The preprocessed pairs under a directory, sorted by name."""
+    return sorted(Path(tensor_dir).glob(f"*{PAIR_SUFFIX}"))
+
+
+class LossHooks:
+    """What install_loss_hooks installed, plus the undo: a context manager, so a class patch never outlives the run
+    that asked for it. ``flags`` is what was actually installed; the variety record is read at exit."""
+
+    def __init__(self, record_into: dict | None = None) -> None:
+        self.flags: dict = {"masked_loss": False, "length_buckets": False}
+        self.record_fn = None
+        self._record_into = record_into
+        self._undo: list = []
+
+    def add_undo(self, fn) -> None:
+        self._undo.append(fn)
+
+    def manifest_fields(self) -> dict:
+        return dict(self.record_fn()) if self.record_fn is not None else {}
+
+    def uninstall(self) -> None:
+        if self._record_into is not None:
+            self._record_into.update(self.manifest_fields())
+        while self._undo:
+            fn = self._undo.pop()
+            try:
+                fn()
+            except Exception as exc:  # noqa: BLE001
+                log.error("loss hook uninstall failed: %s", exc)
+
+    def __enter__(self) -> "LossHooks":
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.uninstall()
+
+
+def install_loss_hooks(cfg: dict, seed: int, start_epoch: int = 0, module_cls=None, data_module_cls=None, stem_ids=(),
+                       training_config=None, record_into: dict | None = None) -> LossHooks:
+    """The masked loss, length-bucket and variety seams (batching.py) when the recipe asks for them, on ACE-Step's
+    classes unless fakes are given; a seam that fails to install is logged and recorded as off, never silent."""
+    from khaos_attribution.engines.acestep import batching as B  # noqa: PLC0415
+    hooks = LossHooks(record_into=record_into)
+    if cfg.get("masked_loss"):
+        try:
+            if module_cls is None:
+                from acestep.training_v2.fixed_lora_module import FixedLoRAModule as module_cls  # noqa: PLC0415
+            if B.install_masked_loss(module_cls):
+                hooks.flags["masked_loss"] = True
+                hooks.add_undo(lambda: B.uninstall_masked_loss(module_cls))
+        except Exception as exc:  # noqa: BLE001
+            log.error("masked_loss requested but not installed (%s) — training UNMASKED", exc)
+    if cfg.get("length_buckets"):
+        try:
+            if data_module_cls is None:
+                from acestep.training.data_module import PreprocessedDataModule as data_module_cls  # noqa: PLC0415
+            if B.install_length_buckets(data_module_cls, seed, start_epoch=start_epoch):
+                hooks.flags["length_buckets"] = True
+                hooks.add_undo(lambda: B.uninstall_length_buckets(data_module_cls))
+        except Exception as exc:  # noqa: BLE001
+            log.error("length_buckets requested but not installed (%s) — upstream shuffle", exc)
+    for k, v in hooks.flags.items():
+        if cfg.get(k) and not v:
+            log.warning("%s: requested but OFF for this run (see the error above)", k)
+    # Crops go on after length_buckets: the crop loader wraps whichever train_dataloader the class has when installed.
+    crop_state = step_state = timestep_rec = None
+    window = float(cfg.get("latent_crop_sec") or 0.0)
+    if window > 0:
+        try:
+            if data_module_cls is None:
+                from acestep.training.data_module import PreprocessedDataModule as data_module_cls  # noqa: PLC0415
+            crop_state = B.install_latent_crops(data_module_cls, window, seed)
+            if crop_state is not None:
+                hooks.add_undo(lambda: B.uninstall_latent_crops(data_module_cls))
+        except Exception as exc:  # noqa: BLE001
+            log.error("latent_crop_sec %.3g requested but not installed (%s) — whole latents", window, exc)
+    weight = float(cfg.get("stem_loss_weight", 1.0))
+    if weight != 1.0 or crop_state is not None:
+        try:
+            if module_cls is None:
+                from acestep.training_v2.fixed_lora_module import FixedLoRAModule as module_cls  # noqa: PLC0415
+            step_state = B.install_step_hooks(module_cls, stem_ids, weight, crop_state)
+            if step_state is not None:
+                hooks.add_undo(lambda: B.uninstall_step_hooks(module_cls))
+        except Exception as exc:  # noqa: BLE001
+            log.error("stem_loss_weight %.3g requested but not installed (%s) — every step at weight 1", weight, exc)
+    if training_config is not None:
+        timestep_rec = B.apply_timestep_bias(training_config, float(cfg.get("timestep_high_noise_bias") or 0.0))
+        if timestep_rec is not None:
+            hooks.add_undo(lambda: B.restore_timestep_bias(training_config))
+    hooks.record_fn = lambda: B.variety_record(crop_state, step_state, timestep_rec, cfg)
+    return hooks
+
+
+def training_config_kwargs(cfg: dict, *, checkpoint_root, tensor_dir, output_dir, device: str, precision: str,
+                           seed: int, resume_from=None) -> dict:
+    """ACE-Step's TrainingConfigV2 fields from a Khaos recipe, every one explicit so the recipe records what runs."""
+    kwargs = {
+        "weight_decay": float(cfg.get("weight_decay", 0.01)),
+        "adapter_type": cfg["adapter_type"],
+        "model_variant": cfg["model_variant"],
+        "checkpoint_dir": str(checkpoint_root),
+        "dataset_dir": str(tensor_dir),
+        "output_dir": str(output_dir),
+        "learning_rate": float(cfg["learning_rate"]),
+        "batch_size": int(cfg["batch_size"]),
+        "max_epochs": int(cfg["max_epochs"]),
+        "seed": int(seed),
+        "precision": precision,
+        "device": device,
+        "gradient_checkpointing": bool(cfg["gradient_checkpointing"]),
+        "num_workers": int(cfg["num_workers"]),
+        "pin_memory": bool(cfg["pin_memory"]),
+        "persistent_workers": bool(cfg["persistent_workers"]),
+        "prefetch_factor": int(cfg["prefetch_factor"]),
+        "save_every_n_epochs": int(cfg["checkpoint_every_n_epochs"]),
+        "scheduler_type": cfg["lr_schedule"],
+        "gradient_accumulation_steps": int(cfg["gradient_accumulation_steps"]),
+    }
+    if resume_from is not None:
+        kwargs["resume_from"] = str(resume_from)
+    return kwargs
+
+
+class Session:
+    """One training run on ACE-Step's trainer: the live module, the event stream, the held-out evaluator on the same
+    module, and the final export. Checkpoints land under ``<output_dir>/checkpoints/epoch_<n>_loss_<x>/``."""
+
+    def __init__(self, api: TrainingApi, trainer, *, cfg: dict, output_dir: Path, seed: int) -> None:
+        self.api = api
+        self.trainer = trainer
+        self.cfg = cfg
+        self.output_dir = Path(output_dir)
+        self.seed = int(seed)
+
+    @property
+    def module(self):
+        return getattr(self.trainer, "module", None)
+
+    @property
+    def training_config(self):
+        return getattr(self.trainer, "training_config", None)
+
+    def install_hooks(self, *, start_epoch: int = 0, stem_ids=(), record_into: dict | None = None) -> LossHooks:
+        return install_loss_hooks(self.cfg, self.seed, start_epoch=start_epoch, stem_ids=stem_ids,
+                                  training_config=self.training_config, record_into=record_into)
+
+    def train(self):
+        """The trainer's own updates, each with step, loss, msg, kind, epoch and, on a checkpoint, its path."""
+        for update in self.trainer.train():
+            yield TrainingUpdate(step=int(getattr(update, "step", 0) or 0),
+                                 loss=float(getattr(update, "loss", 0.0) or 0.0),
+                                 msg=str(getattr(update, "msg", "") or ""),
+                                 kind=str(getattr(update, "kind", "progress") or "progress"),
+                                 epoch=int(getattr(update, "epoch", 0) or 0),
+                                 lr=float(getattr(update, "lr", 0.0) or 0.0),
+                                 epoch_time=float(getattr(update, "epoch_time", 0.0) or 0.0),
+                                 samples_per_sec=float(getattr(update, "samples_per_sec", 0.0) or 0.0),
+                                 checkpoint_path=(str(getattr(update, "checkpoint_path", "") or "") or None))
+
+    def heldout_evaluator(self, tensor_val_dir: Path | str, *, n_buckets: int):
+        from khaos_attribution.engines.acestep.heldout import HeldoutEvaluator  # noqa: PLC0415
+        return HeldoutEvaluator(self.module, tensor_val_dir, seed=self.seed, n_buckets=int(n_buckets))
+
+    def save_final(self, final_dir: Path | str) -> Path:
+        """The adapter exported flat into ``final_dir``; the file it wrote, by the descriptor's names."""
+        final_dir = Path(final_dir)
+        self.api.save_final(self.trainer, str(final_dir))
+        exported = adapter_file_in(final_dir) if final_dir.is_dir() else None
+        if exported is None:
+            raise RuntimeError(f"save_final wrote no adapter file into {final_dir}")
+        return exported
+
+
+def open_session(api: TrainingApi, cfg: dict, *, checkpoint_root, tensor_dir, output_dir, device: str,
+                 precision: str, seed: int, resume_from=None, on_model_loaded=None) -> Session:
+    """The decoder loaded, the adapter and training configs built from the recipe, the trainer made: a Session.
+    A resume on a revision without resume_from is refused rather than silently started fresh."""
+    model = api.load_decoder(str(checkpoint_root), cfg["model_variant"], device, precision)
+    if on_model_loaded is not None:
+        on_model_loaded(model)
+    adapter_type, adapter_cfg = adapter_config(api, cfg, keep_none=False)
+    kwargs = training_config_kwargs(cfg, checkpoint_root=checkpoint_root, tensor_dir=tensor_dir, output_dir=output_dir,
+                                    device=device, precision=precision, seed=seed, resume_from=resume_from)
+    try:
+        accepted = set(inspect.signature(api.TrainingConfig).parameters)
+    except (TypeError, ValueError):
+        accepted = set(kwargs)
+    if resume_from is not None and "resume_from" not in accepted:
+        raise RuntimeError("This ACE-Step checkout has no resume_from support — cannot resume; update ACE-Step or "
+                           "start a fresh run.")
+    train_cfg = accepted_config(api.TrainingConfig, kwargs)
+    log.info("Adapter config: type=%s rank=%d alpha=%d lr=%g epochs=%d", adapter_type, int(cfg["adapter_rank"]),
+             int(cfg["adapter_alpha"]), float(cfg["learning_rate"]), int(cfg["max_epochs"]))
+    trainer = api.Trainer(model, adapter_cfg, train_cfg)
+    return Session(api, trainer, cfg=cfg, output_dir=output_dir, seed=seed)
