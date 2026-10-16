@@ -17,7 +17,7 @@ SLOTS = ("train", "render", "measure")
 RENDER_NAMES = ("Renderer", "RenderRequest", "RenderResult", "RenderCancelled", "RenderFailed")
 RENDERER_METHODS = ("load", "resolve_variant", "apply_adapter", "generate")
 TRAIN_NAMES = ("TrainingUnavailable", "training_api", "adapter_kwargs", "preprocess_pairs", "open_module",
-               "adapter_file_in")
+               "adapter_file_in", "open_session", "pair_files")
 MEASURE_NAMES = ("memory_plan", "scorer_need_gb", "enable_checkpointing", "flush_accelerator")
 LIVE_SECONDS = 5.0
 

@@ -30,6 +30,12 @@ BASE_MODEL_LICENCE_SUMMARIES = {
             "provided the ACE-Step copyright notice travels with any copy of "
             "the model; it says nothing about the artist's music — those rights "
             "come from the artist's consent and rights records."),
+    "Stability AI Community License": (
+        "The Stability AI Community License lets the base model, and what you make with it, be used and sold "
+        "commercially while the maker's yearly revenue stays under Stability's threshold (one million US dollars at "
+        "the time of writing); above it a separate licence from Stability is needed, and 'Powered by Stability AI' "
+        "travels with the model. Its text encoder is Google's and carries the Gemma terms of use. It says nothing "
+        "about the artist's music — those rights come from the artist's consent and rights records."),
 }
 
 # A licence this module has no reading of: say so, name it, and send the
