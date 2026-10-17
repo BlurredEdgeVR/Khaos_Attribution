@@ -1048,7 +1048,7 @@ wheels = [
 
 [[package]]
 name = "khaos-attribution"
-version = "0.31.0"
+version = "0.36.1"
 source = { editable = "." }
 dependencies = [
     { name = "jsonschema", version = "4.25.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
@@ -1083,11 +1083,24 @@ registry = [
     { name = "cryptography", version = "47.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version <= '3.9'" },
     { name = "cryptography", version = "50.0.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version > '3.9'" },
 ]
+rooms = [
+    { name = "c2pa-python", marker = "python_full_version >= '3.10'" },
+    { name = "cryptography", version = "47.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version <= '3.9'" },
+    { name = "cryptography", version = "50.0.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version > '3.9'" },
+    { name = "soundfile", version = "0.13.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
+    { name = "soundfile", version = "0.14.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+]
 service = [
     { name = "cryptography", version = "47.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version <= '3.9'" },
     { name = "cryptography", version = "50.0.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version > '3.9'" },
     { name = "fastapi", version = "0.128.8", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
     { name = "fastapi", version = "0.143.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+    { name = "numpy", version = "2.0.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.10.*'" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
+    { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "soundfile", version = "0.13.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
+    { name = "soundfile", version = "0.14.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
     { name = "uvicorn", version = "0.39.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
     { name = "uvicorn", version = "0.54.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
 ]
@@ -1111,17 +1124,22 @@ verify = [
 requires-dist = [
     { name = "audioseal", marker = "extra == 'detector'", specifier = ">=0.2" },
     { name = "c2pa-python", marker = "python_full_version >= '3.10' and extra == 'credentials'", specifier = ">=0.38" },
+    { name = "c2pa-python", marker = "python_full_version >= '3.10' and extra == 'rooms'", specifier = ">=0.38" },
     { name = "c2pa-python", marker = "python_full_version >= '3.10' and extra == 'verify'", specifier = ">=0.38" },
     { name = "cryptography", marker = "extra == 'credentials'", specifier = ">=42" },
     { name = "cryptography", marker = "extra == 'registry'", specifier = ">=42" },
+    { name = "cryptography", marker = "extra == 'rooms'", specifier = ">=42" },
     { name = "cryptography", marker = "extra == 'service'", specifier = ">=42" },
     { name = "cryptography", marker = "extra == 'verify'", specifier = ">=42" },
     { name = "fastapi", marker = "extra == 'service'", specifier = ">=0.110" },
     { name = "jsonschema", specifier = ">=4.18" },
     { name = "numpy", specifier = ">=1.24" },
+    { name = "numpy", marker = "extra == 'service'", specifier = ">=1.24" },
     { name = "pillow", marker = "extra == 'artwork'", specifier = ">=10" },
     { name = "pillow", marker = "extra == 'test'", specifier = ">=10" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=7" },
+    { name = "soundfile", marker = "extra == 'rooms'", specifier = ">=0.12" },
+    { name = "soundfile", marker = "extra == 'service'", specifier = ">=0.12" },
     { name = "soundfile", marker = "extra == 'test'", specifier = ">=0.12" },
     { name = "soundfile", marker = "extra == 'verify'", specifier = ">=0.12" },
     { name = "torch", marker = "extra == 'detector'", specifier = ">=2.2" },
@@ -1129,7 +1147,7 @@ requires-dist = [
     { name = "torchaudio", marker = "extra == 'detector'", specifier = ">=2.2" },
     { name = "uvicorn", marker = "extra == 'service'", specifier = ">=0.27" },
 ]
-provides-extras = ["test", "artwork", "gradient", "registry", "credentials", "verify", "detector", "service"]
+provides-extras = ["test", "artwork", "gradient", "registry", "credentials", "verify", "rooms", "detector", "service"]
 
 [[package]]
 name = "markupsafe"

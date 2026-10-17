@@ -9,7 +9,7 @@ set -euo pipefail
 
 DOMAIN="${REGISTER_DOMAIN:?set REGISTER_DOMAIN to the name people will open}"
 TAG="${REGISTER_TAG:-main}"
-REPO="${REGISTER_REPO:-https://github.com/BlurredEdgeVR/Khaos_Attribution.git}"
+REPO="${REGISTER_REPO:-https://github.com/khaos-foundation/Khaos_Attribution.git}"
 USER_NAME=register
 HOME_DIR=/srv/register
 CHECKOUT="$HOME_DIR/Khaos_Attribution"

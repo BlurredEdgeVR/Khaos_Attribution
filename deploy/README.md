@@ -4,7 +4,7 @@ One small Ubuntu 24.04 server, SQLite, a few files. `register-server.sh` does th
 
 ```
 ssh root@<server>
-git clone https://github.com/BlurredEdgeVR/Khaos_Attribution.git /root/Khaos_Attribution
+git clone https://github.com/khaos-foundation/Khaos_Attribution.git /root/Khaos_Attribution
 REGISTER_DOMAIN=register.khaos.dev REGISTER_TAG=v0.27.0 bash /root/Khaos_Attribution/deploy/register-server.sh
 ```
 

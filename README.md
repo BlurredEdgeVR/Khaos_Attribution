@@ -25,7 +25,7 @@ lives in the `Khaos_Platform` repo's `DESIGN.md`.
 Directly from GitHub:
 
 ```bash
-pip install "git+https://github.com/BlurredEdgeVR/Khaos_Attribution.git"
+pip install "git+https://github.com/khaos-foundation/Khaos_Attribution.git"
 ```
 
 ## Usage
@@ -50,7 +50,7 @@ Every Khaos output carries two marks: an inaudible watermark and a signed, time-
 Credentials) saying it is AI-generated. To check a file:
 
 ```bash
-pip install "khaos-attribution[verify,detector] @ git+https://github.com/BlurredEdgeVR/Khaos_Attribution.git"
+pip install "khaos-attribution[verify,detector] @ git+https://github.com/khaos-foundation/Khaos_Attribution.git"
 khaos-verify song.wav                      # WAV, FLAC, MP3, OGG; M4A and AAC need FFmpeg
 khaos-verify song.mp3 --register https://register.example --json
 ```

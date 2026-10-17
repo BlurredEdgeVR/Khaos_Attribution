@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/BlurredEdgeVR/Khaos_Attribution/schemas/model_card.schema.json",
+  "$id": "https://github.com/khaos-foundation/Khaos_Attribution/schemas/model_card.schema.json",
   "title": "Model Card",
   "description": "A card describing an artist adapter: who consented, what it was trained on, and which base model it extends.",
   "type": "object",

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/BlurredEdgeVR/Khaos_Attribution/schemas/track_rights.schema.json",
+  "$id": "https://github.com/khaos-foundation/Khaos_Attribution/schemas/track_rights.schema.json",
   "title": "Track Rights Record",
   "description": "Who owns one training track: writers and publishers with their shares, plus the industry identifiers (ISRC for the recording, ISWC for the underlying work). Absence is always explicit \u2014 'none assigned' and 'not yet looked up' are different facts, and only 'assigned' carries a value.",
   "type": "object",

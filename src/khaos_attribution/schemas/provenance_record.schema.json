@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/BlurredEdgeVR/Khaos_Attribution/schemas/provenance_record.schema.json",
+  "$id": "https://github.com/khaos-foundation/Khaos_Attribution/schemas/provenance_record.schema.json",
   "title": "Provenance Record",
   "description": "A record attached to a generated output, documenting which artist adapter, prompt, and base model produced it.",
   "type": "object",

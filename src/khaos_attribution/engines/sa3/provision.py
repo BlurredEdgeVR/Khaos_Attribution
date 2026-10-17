@@ -208,7 +208,7 @@ def environment(root: Path, runtime: str, *, check_only: bool = False) -> tuple:
 
 CONTRACT_SRC_ENV = "KHAOS_CONTRACT_SRC"
 CONTRACT_WHEEL_ENV = "KHAOS_CONTRACT_WHEEL"
-CONTRACT_REPO = "https://github.com/BlurredEdgeVR/Khaos_Attribution.git"
+CONTRACT_REPO = "https://github.com/khaos-foundation/Khaos_Attribution.git"
 
 
 def contract_spec(root: Path) -> str:

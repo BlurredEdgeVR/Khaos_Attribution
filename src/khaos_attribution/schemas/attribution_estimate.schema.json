@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/BlurredEdgeVR/Khaos_Attribution/schemas/attribution_estimate.schema.json",
+  "$id": "https://github.com/khaos-foundation/Khaos_Attribution/schemas/attribution_estimate.schema.json",
   "title": "Attribution Estimate",
   "description": "An ESTIMATE of how much each training track influenced one generated output, and the writer/publisher splits that follow from it. This document is a methodology-stamped estimate with uncertainty ranges, never a legal statement of ownership. It never replaces the provenance record; it rides alongside it.",
   "type": "object",
