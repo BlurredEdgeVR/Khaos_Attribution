@@ -65,3 +65,21 @@ def test_the_pins_helper_reads_a_checkout_and_never_guesses(tmp_path, monkeypatc
     assert pins.is_sha(sha)
     monkeypatch.setenv("GIT_DIR", str(tmp_path / "elsewhere"))
     assert "GIT_DIR" not in pins.git_env() and pins.checkout_commit(tmp_path) == sha, "an inherited GIT_DIR never redirects the question"
+
+
+def test_capabilities_say_what_a_form_may_offer_and_explain_each_control_it_must_hide():
+    """Both rooms hide a control the engine lacks and say why in the contract's words."""
+    ace = E.capabilities("acestep-1.5")
+    assert ace["sings"] and ace["musical"] and ace["absent"] == {} and ace["bounds"]["duration"] == [5, 600]
+    assert ace["variants"]["turbo"]["step_clamp"] == 8 and ace["default_variant"] == "turbo"
+    sa3 = E.capabilities("stable-audio-3")
+    assert not sa3["sings"] and not sa3["musical"] and sa3["bounds"]["duration"] == [5, 120]
+    assert sa3["absent"]["lyrics"].startswith("Stable Audio 3 Medium does not sing")
+    assert sa3["absent"]["musical"] == ("Stable Audio 3 Medium takes no tempo, key or time signature; "
+                                        "describe the feel in the prompt instead.")
+    assert sa3["absent"]["rework.extend"] == "Stable Audio 3 Medium cannot make a piece longer."
+    assert "rework.repaint" not in sa3["absent"] and sa3["rework_modes"] == ["retake", "repaint", "audio2audio"]
+    assert sa3["vocal_languages"] == {} and sa3["sample_rate"] == 44100
+    assert E.capabilities("mock")["absent"] == {}
+    with pytest.raises(E.EngineUnavailable):
+        E.capabilities("no-such-engine")

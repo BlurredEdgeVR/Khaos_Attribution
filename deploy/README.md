@@ -11,7 +11,7 @@ REGISTER_DOMAIN=register.khaos.dev REGISTER_TAG=v0.27.0 bash /root/Khaos_Attribu
 What it leaves behind:
 
 - `/srv/register/`: the checkout at the tag, the venv (the `registry` and `service` extras only), `data/` (the two databases, the mirror files, the key), `backups/`.
-- `/etc/register.env`: the service's settings. `REGISTER_DEV_KEY=1` until the ceremony.
+- `/etc/register.env`: the service's settings. `REGISTER_DEV_KEY=1` until the ceremony, with `REGISTER_DEV_KEY_PUBLIC=1` beside it: a development key serves behind the proxy only when the deploy says so (binding loopback keeps nothing private once Caddy fronts it).
 - `register.service` on loopback port 8912; Caddy on 80 and 443 with the certificate for the domain; the firewall open on 22, 80 and 443.
 - `register-backup.timer`: nightly at 03:30, a consistent copy of both databases and the mirror into `backups/`, kept 30 days, sent to `BACKUP_TARGET` over ssh when one is set in `/etc/register.env` (a Hetzner Storage Box takes rsync over ssh on port 23). The key is never in a backup.
 - `register-restore.sh <archive>`: the way back, ending with the ledger check.

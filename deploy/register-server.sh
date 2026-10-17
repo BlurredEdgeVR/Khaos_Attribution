@@ -76,8 +76,10 @@ if [ ! -f "$ENV_FILE" ]; then
 REGISTER_DATA_DIR=$DATA
 REGISTER_KEY_FILE=$DATA/register-key.pem
 REGISTER_PUBLIC_URL=https://$DOMAIN
-# 1 until the Guardians' key is placed at REGISTER_KEY_FILE by the ceremony; then delete this line and restart.
+# 1 until the Guardians' key is placed at REGISTER_KEY_FILE by the ceremony; then delete both lines and restart.
 REGISTER_DEV_KEY=1
+# The development key is reachable at REGISTER_PUBLIC_URL through Caddy, by decision; nothing it signs is a Guild record.
+REGISTER_DEV_KEY_PUBLIC=1
 # The storage box for the nightly backup, as user@host:path over ssh (Hetzner: port 23); empty keeps backups local only.
 BACKUP_TARGET=
 BACKUP_PORT=23
@@ -85,6 +87,10 @@ BACKUP_PORT=23
 LEDGER_REPO=
 ENV
   chmod 640 "$ENV_FILE"; chown root:"$USER_NAME" "$ENV_FILE"
+fi
+# A settings file from before the exposure check keeps its development key serving: the decision it already made.
+if grep -q '^REGISTER_DEV_KEY=1' "$ENV_FILE" && ! grep -q '^REGISTER_DEV_KEY_PUBLIC=' "$ENV_FILE"; then
+  echo "REGISTER_DEV_KEY_PUBLIC=1" >> "$ENV_FILE"
 fi
 
 echo "== systemd"

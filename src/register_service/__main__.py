@@ -13,7 +13,7 @@
 import argparse
 import sys
 
-from register_service.app import DEFAULT_PORT, create_app, settings
+from register_service.app import DEFAULT_PORT, check_dev_key_exposure, create_app, settings
 from register_service.store import Store
 
 
@@ -49,8 +49,7 @@ def main(argv=None) -> int:
         return 0
     if a.cmd == "serve":
         import uvicorn  # noqa: PLC0415
-        if cfg["dev_key"] and a.host not in ("127.0.0.1", "localhost", "::1"):
-            raise SystemExit("a development key serves on loopback only")
+        check_dev_key_exposure(cfg, a.host)
         # One worker by design: the serial and the ledger chain are kept under one process's lock.
         uvicorn.run(create_app(cfg), host=a.host, port=a.port, log_level="info")
         return 0

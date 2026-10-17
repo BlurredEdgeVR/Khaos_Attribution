@@ -398,3 +398,24 @@ def test_the_public_pages_read_the_ledger_check_at_most_once_a_minute(register):
     assert store.ledger_status()["checked_at_utc"] == first["checked_at_utc"], "within the minute, the last reading"
     assert store.ledger_ok() is False, "the real check is always whole"
     assert store.ledger_status(max_age_s=0)["ok"] is False
+
+
+def test_the_schema_and_docs_are_not_served(register):
+    """The public doors are documented in the deploy notes, never enumerated to a caller."""
+    _, _, http = register
+    assert http.get("/openapi.json").status_code == 404 and http.get("/docs").status_code == 404
+    assert http.get("/health").status_code == 200
+
+
+def test_a_development_key_serves_behind_a_proxy_only_by_decision():
+    """Loopback alone keeps nothing private once a proxy fronts it: the public address decides."""
+    from register_service.app import check_dev_key_exposure
+    loop = {"dev_key": True, "dev_key_public": False, "public_url": "http://127.0.0.1:8912"}
+    check_dev_key_exposure(loop, "127.0.0.1")
+    with pytest.raises(SystemExit, match="loopback only"):
+        check_dev_key_exposure(loop, "0.0.0.0")
+    fronted = {**loop, "public_url": "https://register.example"}
+    with pytest.raises(SystemExit, match="REGISTER_DEV_KEY_PUBLIC"):
+        check_dev_key_exposure(fronted, "127.0.0.1")
+    check_dev_key_exposure({**fronted, "dev_key_public": True}, "127.0.0.1")
+    check_dev_key_exposure({**fronted, "dev_key": False}, "0.0.0.0")

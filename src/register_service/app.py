@@ -12,6 +12,7 @@ import os
 import threading
 import time
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from starlette.concurrency import run_in_threadpool
@@ -34,7 +35,25 @@ def settings() -> dict:
     data = Path(os.environ.get("REGISTER_DATA_DIR", "./register-data")).resolve()
     key_file = Path(os.environ.get("REGISTER_KEY_FILE", str(data / "register-key.pem")))
     return {"data": data, "key_file": key_file, "dev_key": os.environ.get("REGISTER_DEV_KEY") == "1",
+            # A development key reachable from outside, by decision: the deploy sets it beside REGISTER_DEV_KEY.
+            "dev_key_public": os.environ.get("REGISTER_DEV_KEY_PUBLIC") == "1",
             "public_url": os.environ.get("REGISTER_PUBLIC_URL", f"http://127.0.0.1:{DEFAULT_PORT}").rstrip("/")}
+
+
+LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1")
+
+
+def check_dev_key_exposure(cfg: dict, host: str) -> None:
+    """A development key serves on loopback, and behind a proxy only when the deploy says so: binding loopback
+    keeps nothing private once a proxy fronts it, so the public address is what is checked."""
+    if not cfg["dev_key"]:
+        return
+    if host not in LOOPBACK_HOSTS:
+        raise SystemExit("a development key serves on loopback only")
+    public_host = urlsplit(cfg["public_url"]).hostname or ""
+    if public_host not in LOOPBACK_HOSTS and not cfg["dev_key_public"]:
+        raise SystemExit(f"a development key is reachable at {cfg['public_url']} through a proxy; set "
+                         "REGISTER_DEV_KEY_PUBLIC=1 to serve it there knowingly, or point REGISTER_PUBLIC_URL at loopback")
 
 
 def dev_marker(cfg: dict) -> Path:
@@ -113,7 +132,8 @@ def create_app(cfg: dict | None = None) -> FastAPI:
     key = load_register_key(cfg)
     mirror = cfg["data"] / "mirror"
     (mirror / "models").mkdir(parents=True, exist_ok=True)
-    app = FastAPI(title="Guild Register", docs_url=None, redoc_url=None)
+    # No schema served either: the public doors are documented in deploy/README.md, not enumerated to callers.
+    app = FastAPI(title="Guild Register", docs_url=None, redoc_url=None, openapi_url=None)
     app.state.store, app.state.index, app.state.key, app.state.cfg = store, index, key, cfg
 
     async def signed_body(request: Request, enrolling: bool = False, limit: int = MAX_BODY) -> tuple:
