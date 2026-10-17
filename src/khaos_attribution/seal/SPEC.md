@@ -3,7 +3,7 @@
 ## Naming
 
 The members' body is the **Guild of Fine Tuners** — the Guild, after first
-mention. The **Khaos Foundation** holds the Register; its trustees are the
+mention. The **Khaos Foundation Limited** holds the Register; its trustees are the
 **Guardians**. The Foundation's name is subject to a trade mark question:
 it appears in human-readable text only, never in a filename, module name or
 public identifier, so a rename is a find-and-replace.

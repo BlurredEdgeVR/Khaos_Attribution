@@ -102,7 +102,7 @@ def page(title: str, body: str, *, dev: bool) -> str:
             f'<a class="brand" href="/">{STAR_SVG}<span>Guild Register</span><small>of Fine Tuners</small></a>'
             f'{dev_line}{body}'
             f'<div class="foot"><a href="/api/ledger">The ledger</a><a href="/api/public-key">The register\'s public key</a>'
-            f'<a href="https://github.com/guild-register/ledger">The public mirror</a><span>Kept by the Khaos Foundation</span></div>'
+            f'<a href="https://github.com/guild-register/ledger">The public mirror</a><span>Kept by the Khaos Foundation Limited</span></div>'
             f'</main></body></html>')
 
 
