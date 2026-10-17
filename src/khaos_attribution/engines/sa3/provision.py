@@ -260,6 +260,26 @@ def cached(repo: str, filenames: list) -> bool:
     return True
 
 
+# Stability's repository keeps the port's files under MLX/; the port reads them under models/mlx/.
+MLX_REPO_DIR = "MLX"
+
+
+def _mlx_from_mirror(repo: str, mlx: Path, components: list) -> str | None:
+    """The port's files from the mirror, moved from the repository's folder to where the port reads them."""
+    names = [Path(c).name for c in components]
+    served = mirror.fetch_into_dir(repo, mlx, [f"{MLX_REPO_DIR}/{n}" for n in names] + ["LICENSE*", "NOTICE"])
+    if served is None:
+        return None
+    for component, name in zip(components, names):
+        fetched, wanted = mlx / MLX_REPO_DIR / name, mlx / component
+        if fetched.is_file():
+            wanted.parent.mkdir(parents=True, exist_ok=True)
+            if wanted.exists() or wanted.is_symlink():
+                wanted.unlink()
+            fetched.replace(wanted)
+    return served
+
+
 def _from_mirror(fetch) -> bool:
     """Whether the mirror served the set; a mirror that cannot is a fallback to the hub, never an error here."""
     try:
@@ -297,7 +317,7 @@ def weights(root: Path, runtime: str, weights_dir: Path, *, check_only: bool = F
                 out.append((not required, f"{w['repo']} missing under {mlx}"))
                 continue
             # Khaos's own mirror first; the port's downloader only when the mirror cannot serve the set.
-            if _from_mirror(lambda: mirror.fetch_into_dir(w["repo"], mlx, w.get("components"))) and all(f.exists() for f in parts):
+            if _from_mirror(lambda: _mlx_from_mirror(w["repo"], mlx, w.get("components") or [])) and all(f.exists() for f in parts):
                 out.append((True, f"{w['repo']} fetched from the Khaos weights mirror"))
                 continue
             code = ("import sys; sys.path.insert(0, 'scripts'); from weights import ensure_local; "

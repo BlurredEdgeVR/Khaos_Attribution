@@ -97,3 +97,21 @@ def test_the_mirror_address_comes_from_the_environment_or_the_default(monkeypatc
     monkeypatch.setenv(W.MIRROR_ENV, "https://example.test/weights/")
     assert W.base_url() == "https://example.test/weights"
     assert W.base_url("http://x/") == "http://x"
+
+
+def test_the_mlx_ports_files_land_where_the_port_reads_them(mirror, tmp_path, monkeypatch):
+    """Stability keeps the port's files under MLX/; the engine's weights step puts them under models/mlx/."""
+    from khaos_attribution.engines.sa3 import provision as P
+    base, _, rev, _ = mirror
+    root = tmp_path / "mirror" / "stabilityai" / "stable-audio-3-optimized"
+    (root / rev / "MLX").mkdir(parents=True)
+    (root / rev / "MLX" / "t5gemma_f16.npz").write_bytes(b"npz")
+    (root / rev / "LICENSE_GEMMA.md").write_bytes(b"terms")
+    files = [{"path": "MLX/t5gemma_f16.npz", "size": 3, "sha256": hashlib.sha256(b"npz").hexdigest()},
+             {"path": "LICENSE_GEMMA.md", "size": 5, "sha256": hashlib.sha256(b"terms").hexdigest()}]
+    (root / "manifest.json").write_text(json.dumps({"repo": "stabilityai/stable-audio-3-optimized", "revision": rev, "files": files}))
+    monkeypatch.setenv(W.MIRROR_ENV, base)
+    mlx = tmp_path / "port"
+    assert P._mlx_from_mirror("stabilityai/stable-audio-3-optimized", mlx, ["models/mlx/t5gemma_f16.npz"]) == rev
+    assert (mlx / "models" / "mlx" / "t5gemma_f16.npz").read_bytes() == b"npz" and not (mlx / "MLX" / "t5gemma_f16.npz").exists()
+    assert (mlx / "LICENSE_GEMMA.md").read_bytes() == b"terms", "the terms travel with the files"
