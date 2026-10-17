@@ -208,7 +208,10 @@ $DOMAIN {
 CADDY
 
 systemctl daemon-reload
-systemctl enable --now register.service register-backup.timer register-mirror.timer
+systemctl enable register.service register-backup.timer register-mirror.timer
+systemctl start register-backup.timer register-mirror.timer
+# A re-run serves the tag it just put in place: a running service is restarted, not left on the old code.
+systemctl restart register.service
 systemctl restart caddy
 sleep 2
 systemctl --no-pager --quiet is-active register.service && echo "register: running" || { journalctl -u register.service --no-pager -n 30; exit 1; }
