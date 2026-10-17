@@ -265,19 +265,16 @@ MLX_REPO_DIR = "MLX"
 
 
 def _mlx_from_mirror(repo: str, mlx: Path, components: list) -> str | None:
-    """The port's files from the mirror, moved from the repository's folder to where the port reads them."""
-    names = [Path(c).name for c in components]
-    served = mirror.fetch_into_dir(repo, mlx, [f"{MLX_REPO_DIR}/{n}" for n in names] + ["LICENSE*", "NOTICE"])
-    if served is None:
-        return None
-    for component, name in zip(components, names):
-        fetched, wanted = mlx / MLX_REPO_DIR / name, mlx / component
-        if fetched.is_file():
-            wanted.parent.mkdir(parents=True, exist_ok=True)
-            if wanted.exists() or wanted.is_symlink():
-                wanted.unlink()
-            fetched.replace(wanted)
-    return served
+    """The port's files from the mirror, each placed straight where the port reads it (with the licence and the
+    notice beside them), so a retry finds what already landed and the checkout gains no file of its own."""
+    by_name = {Path(c).name: c for c in components}
+    folder = str(Path(components[0]).parent) if components else "models/mlx"
+
+    def place(path: str) -> str:
+        name = Path(path).name
+        return by_name.get(name) or f"{folder}/{name}"
+
+    return mirror.fetch_into_dir(repo, mlx, [f"{MLX_REPO_DIR}/{n}" for n in by_name] + ["LICENSE*", "NOTICE"], place=place)
 
 
 def _from_mirror(fetch) -> bool:

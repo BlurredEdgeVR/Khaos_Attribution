@@ -67,6 +67,11 @@ def _download(url: str, dest: Path, size: int, sha256: str, progress: Callable[[
     dest.parent.mkdir(parents=True, exist_ok=True)
     if dest.is_file() and dest.stat().st_size == size and _sha256(dest) == sha256:
         return
+    if size == 0:
+        if sha256 != hashlib.sha256(b"").hexdigest():
+            raise MirrorError(f"{url}: the manifest names an empty file with a hash that is not the empty hash")
+        dest.write_bytes(b"")
+        return
     part = dest.with_name(dest.name + ".part")
     have = part.stat().st_size if part.is_file() else 0
     if have > size:
@@ -89,16 +94,17 @@ def _download(url: str, dest: Path, size: int, sha256: str, progress: Callable[[
 
 
 def fetch_into_dir(repo: str, dest: Path | str, patterns: list | tuple | None = None, *, base: str | None = None,
-                   progress: Callable[[str], None] | None = None, revision: str | None = None) -> str | None:
-    """The repository's files, laid out under `dest` as the hub's local-dir download lays them out; the revision
-    served, or None when the mirror cannot serve this set (or not the revision asked for)."""
+                   progress: Callable[[str], None] | None = None, revision: str | None = None,
+                   place: Callable[[str], str] | None = None) -> str | None:
+    """The repository's files, laid out under `dest` as the hub's local-dir download lays them out (or where `place`
+    maps each path); the revision served, or None when the mirror cannot serve this set or this revision."""
     doc = manifest(repo, base)
     if doc is None or (revision and doc["revision"] != revision):
         return None
     dest = Path(dest)
     for f in _wanted(doc["files"], patterns):
-        _download(f"{base_url(base)}/{repo}/{doc['revision']}/{f['path']}", dest / f["path"], int(f["size"]),
-                  f["sha256"], progress)
+        _download(f"{base_url(base)}/{repo}/{doc['revision']}/{f['path']}", dest / (place(f["path"]) if place else f["path"]),
+                  int(f["size"]), f["sha256"], progress)
     return doc["revision"]
 
 

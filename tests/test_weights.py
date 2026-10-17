@@ -113,5 +113,19 @@ def test_the_mlx_ports_files_land_where_the_port_reads_them(mirror, tmp_path, mo
     monkeypatch.setenv(W.MIRROR_ENV, base)
     mlx = tmp_path / "port"
     assert P._mlx_from_mirror("stabilityai/stable-audio-3-optimized", mlx, ["models/mlx/t5gemma_f16.npz"]) == rev
-    assert (mlx / "models" / "mlx" / "t5gemma_f16.npz").read_bytes() == b"npz" and not (mlx / "MLX" / "t5gemma_f16.npz").exists()
-    assert (mlx / "LICENSE_GEMMA.md").read_bytes() == b"terms", "the terms travel with the files"
+    assert (mlx / "models" / "mlx" / "t5gemma_f16.npz").read_bytes() == b"npz" and not (mlx / "MLX").exists()
+    assert (mlx / "models" / "mlx" / "LICENSE_GEMMA.md").read_bytes() == b"terms", "the terms travel with the files, beside them"
+    # A second run finds the file where it was placed and fetches nothing again.
+    (mlx / "models" / "mlx" / "t5gemma_f16.npz").write_bytes(b"npz")
+    assert P._mlx_from_mirror("stabilityai/stable-audio-3-optimized", mlx, ["models/mlx/t5gemma_f16.npz"]) == rev
+
+
+def test_an_empty_file_in_a_set_is_written_whole_and_never_resumed(mirror, tmp_path):
+    base, _, rev, _ = mirror
+    root = tmp_path / "mirror" / "org" / "withempty"
+    (root / rev).mkdir(parents=True)
+    (root / rev / "empty.txt").write_bytes(b"")
+    (root / "manifest.json").write_text(json.dumps({"repo": "org/withempty", "revision": rev,
+        "files": [{"path": "empty.txt", "size": 0, "sha256": hashlib.sha256(b"").hexdigest()}]}))
+    assert W.fetch_into_dir("org/withempty", tmp_path / "e", base=base) == rev
+    assert (tmp_path / "e" / "empty.txt").is_file() and (tmp_path / "e" / "empty.txt").stat().st_size == 0
