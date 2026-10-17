@@ -456,6 +456,8 @@ class AceStepRenderer:
         record = dict(audio.get("params") or {})
         record["khaos_seed"] = seed
         record["khaos_variant"] = variant
+        # Every output keeps its engine's own rate and its record says which.
+        record.setdefault("sample_rate", DESCRIPTOR.sample_rate)
         if applied is not None:
             record["lora_scale"] = applied[0]
             record["khaos_adapter_scale_path"] = applied[1]
