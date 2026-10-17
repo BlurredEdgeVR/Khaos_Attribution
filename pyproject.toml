@@ -9,7 +9,7 @@ description = "JSON schemas and validators for artist attribution: provenance re
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "LicenseRef-Khaos-Free-Use: free to use, not open source; see LICENSE" }
-authors = [{ name = "BlurredEdgeVR" }]
+authors = [{ name = "Khaos Foundation Limited" }]
 dependencies = [
     "jsonschema>=4.18",
     # blend.py and embedding.py: the estimator math and embedding contract
