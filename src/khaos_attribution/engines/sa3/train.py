@@ -36,6 +36,7 @@ CONVERT_WORKER = Path(__file__).with_name("convert_worker.py")
 TRAIN_DRIVER = Path(__file__).with_name("train_driver.py")
 LOSSES_CSV = "khaos_losses.csv"
 POLL_SECONDS = 2.0
+TORCH_MIN_PAIRS = 4
 
 __all__ = ["LossHooks", "Session", "TrainingApi", "TrainingUnavailable", "adapter_file_in", "adapter_kwargs",
            "open_module", "open_session", "pair_files", "preprocess_pairs", "training_api"]
@@ -479,6 +480,10 @@ class Session:
 def open_session(api: TrainingApi, cfg: dict, *, checkpoint_root, tensor_dir, output_dir, device: str,
                  precision: str, seed: int, resume_from=None, on_model_loaded=None) -> Session:
     """A session on Stability's trainer; nothing is loaded until train() runs, so on_model_loaded fires at once."""
+    # Stability's CUDA trainer pre-fetches a demo batch of four whole pairs before the first step.
+    if api.runtime == "torch" and len(pair_files(tensor_dir)) < TORCH_MIN_PAIRS:
+        raise TrainingUnavailable(f"Stable Audio 3's trainer needs at least {TORCH_MIN_PAIRS} pairs; "
+                                  f"{len(pair_files(tensor_dir))} under {tensor_dir}")
     if api.runtime == "mlx" and not (Path(checkpoint_root) / BASE_NPZ).is_file():
         raise TrainingUnavailable(f"the MLX trainer needs the base weights as {BASE_NPZ} under {checkpoint_root}; "
                                   "provision the engine first")

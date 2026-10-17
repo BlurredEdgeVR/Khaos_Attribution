@@ -69,6 +69,7 @@ def api(tmp_path, monkeypatch):
     convert = tmp_path / "convert.py"
     convert.write_text(FAKE_CONVERT)
     monkeypatch.setattr(T, "CONVERT_WORKER", convert)
+    monkeypatch.setattr(T, "TORCH_MIN_PAIRS", 1)   # the fake trainer takes no demo batch
     return T.TrainingApi(root=root, runtime="torch", python=sys.executable)
 
 
@@ -264,3 +265,12 @@ def test_save_final_refuses_an_older_epoch_and_resume_sets_the_earlier_run_aside
 
 def test_steps_round_up_so_a_short_last_batch_counts():
     assert T.steps_for({"max_epochs": 2, "batch_size": 4}, 5)["per_epoch"] == 2
+
+
+def test_the_torch_trainer_needs_four_pairs_for_its_demo_batch(api, tmp_path, monkeypatch):
+    monkeypatch.setattr(T, "TORCH_MIN_PAIRS", 4)
+    tensors = tmp_path / "run" / "tensors"
+    _clips(tensors, 3)
+    with pytest.raises(TrainingUnavailable, match="at least 4 pairs"):
+        T.open_session(api, RECIPE, checkpoint_root=tmp_path, tensor_dir=tensors, output_dir=tmp_path / "run",
+                       device="cuda", precision="bf16", seed=1)
